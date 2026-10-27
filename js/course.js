@@ -197,21 +197,50 @@
   // Máximo de botones de respuesta cuando no hay teclado.
   const MAX_OPTIONS = 4;
 
-  // Devuelve una función que genera la siguiente pregunta de la sesión,
-  // sin repetir el mismo elemento dos veces seguidas.
+  // Como mucho, cuántas veces seguidas puede salir el mismo elemento.
+  const MAX_RUN = 3;
+
+  function longestRun(seq) {
+    let best = 0;
+    let run = 0;
+    seq.forEach((x, i) => {
+      run = i > 0 && x === seq[i - 1] ? run + 1 : 1;
+      best = Math.max(best, run);
+    });
+    return best;
+  }
+
+  // Orden de preguntas de una sesión: cada elemento sale el mismo número de
+  // veces (si no cuadra, como mucho una más), barajado al azar y sin que
+  // ninguno salga más de MAX_RUN veces seguidas.
+  function deck(pool, total, rng) {
+    const base = [];
+    for (let i = 0; i < total; i++) base.push(pool[i % pool.length]);
+    // El reparto del sobrante se hace al azar, no siempre a los primeros.
+    const extra = total % pool.length;
+    if (extra) {
+      const lucky = shuffle(pool, rng).slice(0, extra);
+      base.splice(total - extra, extra, ...lucky);
+    }
+    let seq = shuffle(base, rng);
+    for (let tries = 0; pool.length > 1 && longestRun(seq) > MAX_RUN && tries < 1000; tries++) {
+      seq = shuffle(base, rng);
+    }
+    return seq;
+  }
+
+  // Devuelve una función que genera la siguiente pregunta de la sesión.
   function questions(lesson, rng) {
     rng = rng || Math.random;
     const pool = lesson.items;
-    let last = null;
+    let order = [];
     return function next() {
-      let it;
-      do { it = pool[Math.floor(rng() * pool.length)]; } while (pool.length > 1 && it === last);
-      last = it;
+      if (!order.length) order = deck(pool, lesson.total, rng);
+      const it = order.shift();
       if (lesson.kb) return { item: it, options: null };
-      let options = pool;
-      if (pool.length > MAX_OPTIONS) {
-        options = [it, ...shuffle(pool.filter((p) => p !== it), rng).slice(0, MAX_OPTIONS - 1)];
-      }
+      // Si caben todas, cada opción se queda en su sitio toda la sesión.
+      if (pool.length <= MAX_OPTIONS) return { item: it, options: pool };
+      const options = [it, ...shuffle(pool.filter((p) => p !== it), rng).slice(0, MAX_OPTIONS - 1)];
       return { item: it, options: shuffle(options, rng) };
     };
   }
@@ -231,7 +260,7 @@
     return n(a) === n(b);
   }
 
-  const api = { build, questions, sameText, percent, passed, shuffle, TOTAL, LIVES, MODES, PASS, MEANINGS };
+  const api = { build, questions, deck, longestRun, sameText, percent, passed, shuffle, TOTAL, LIVES, MODES, PASS, MEANINGS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Course = api;
 })(typeof window !== 'undefined' ? window : globalThis);

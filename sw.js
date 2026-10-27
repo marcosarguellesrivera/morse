@@ -1,5 +1,5 @@
 // Caché para uso sin conexión. Cambia VERSION al publicar cambios.
-const VERSION = 'morse-v5';
+const VERSION = 'morse-v9';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/styles.css',
   'js/morse.js', 'js/course.js', 'js/app.js',

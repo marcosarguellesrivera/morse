@@ -108,12 +108,12 @@ test('estructura del curso', () => {
   for (const it of Object.values(c.items)) assert.ok(it.morse && !it.morse.includes('undefined'), it.text);
 });
 
-test('preguntas: opciones correctas y sin repetir seguidas', () => {
+test('preguntas: opciones correctas y como mucho tres iguales seguidas', () => {
   const c = Course.build();
   for (const l of c.lessons) {
     const next = Course.questions(l);
-    let prev = null;
-    for (let i = 0; i < 30; i++) {
+    const seq = [];
+    for (let i = 0; i < l.total; i++) {
       const q = next();
       if (l.kb) {
         assert.strictEqual(q.options, null);
@@ -123,10 +123,37 @@ test('preguntas: opciones correctas y sin repetir seguidas', () => {
         assert.ok(q.options.length >= 2 && q.options.length <= 4);
         assert.strictEqual(new Set(q.options).size, q.options.length);
       }
-      if (l.items.length > 1) assert.notStrictEqual(q.item, prev);
-      prev = q.item;
+      seq.push(q.item);
     }
+    if (l.items.length > 1) assert.ok(Course.longestRun(seq) <= 3, `${l.id}: más de tres seguidas`);
   }
+});
+
+test('en las lecciones las opciones no cambian de sitio', () => {
+  const c = Course.build();
+  const l = c.lessons.find((x) => x.type === 'learn' && x.subtitle === 'L & F');
+  const next = Course.questions(l);
+  for (let i = 0; i < 20; i++) assert.deepStrictEqual(next().options.map((o) => o.text), ['L', 'F']);
+});
+
+test('al final de la sesión ha salido cada letra las mismas veces', () => {
+  const c = Course.build();
+  const l = c.lessons[0]; // E & T, 20 preguntas
+  let sawThree = false;
+  for (let k = 0; k < 200; k++) {
+    const next = Course.questions(l);
+    const seq = Array.from({ length: l.total }, () => next().item.text);
+    assert.strictEqual(seq.filter((x) => x === 'E').length, 10);
+    assert.strictEqual(seq.filter((x) => x === 'T').length, 10);
+    assert.ok(Course.longestRun(seq) <= 3);
+    if (Course.longestRun(seq) === 3) sawThree = true;
+  }
+  assert.ok(sawThree, 'nunca salen tres seguidas');
+  // Con reparto no exacto (25 preguntas entre 6), nadie saca más de una de ventaja.
+  const counts = {};
+  Course.deck(c.lessons[3].items, 25, Math.random).forEach((i) => { counts[i.text] = (counts[i.text] || 0) + 1; });
+  const v = Object.values(counts);
+  assert.ok(Math.max(...v) - Math.min(...v) <= 1);
 });
 
 test('comparación de respuestas escritas', () => {
