@@ -6,19 +6,21 @@ Se puede instalar en el móvil como si fuera una app (PWA).
 
 ## Qué incluye
 
-**Curso guiado en 6 secciones** (Alfabeto, Números, Puntuación, Palabras y abreviaturas,
-Prosignos, Códigos Q y QSO). Cada subsección tiene lecciones de dos en dos caracteres,
-un **repaso** y un **desafío con 3 vidas**, y todas se pueden hacer en dos modos:
+**Curso guiado en 6 secciones**: Caracteres (Alfabeto, Números y Puntuación), Palabras,
+frases y oraciones, Prosignos, Códigos Q, Abreviaturas y Conceptos básicos del QSO en CW.
+Cada subsección alterna lecciones (caracteres nuevos de dos en dos), repasos de todo lo
+aprendido y desafíos con 3 vidas: tras la lección 3 y luego cada dos lecciones.
 
-- **Recepción**: suena el código y eliges el carácter entre botones grandes. El ojo
-  muestra el patrón (una vez) y el botón ▶ lo repite.
-- **Envío**: aparece el carácter y lo transmites manteniendo pulsada la zona inferior
-  (o la barra espaciadora). La app aprende tu velocidad mientras manipulas y comprueba
-  cada punto y raya al momento, sin esperar pausas entre letras.
+Todas las sesiones se hacen en dos modos que avanzan por separado:
 
-Arriba se ven los aciertos/respuestas, la barra de progreso hasta el objetivo de la
-sesión y la racha 🔥. Las estrellas dependen de la precisión, y superar una lección en
-cualquiera de los dos modos desbloquea la siguiente.
+- **Recepción**: suena el código y eliges la respuesta. En las lecciones hay dos botones;
+  en repasos y desafíos, un teclado completo con solo lo aprendido activo. Se muestra la
+  solución durante 3 segundos y se pasa a la siguiente.
+- **Envío**: transmites el carácter manteniendo pulsada la zona inferior (o la barra
+  espaciadora). La app aprende tu velocidad y comprueba cada punto y raya al momento.
+
+Una sesión se supera con un 80 % de aciertos (sesiones de 20, 25 y 15 preguntas). La
+pantalla de Lecciones muestra el progreso de recepción, desafíos y envío y la racha de días.
 
 **Salidas** (se activan y desactivan en cualquier momento, también durante una lección):
 🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna del móvil.
