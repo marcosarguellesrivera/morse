@@ -29,14 +29,20 @@ cada sección termina con un **desafío** con 3 vidas. Las lecciones combinan:
 Se necesita un 80 % de aciertos para superar una lección (★ 80 %, ★★ 90 %, ★★★ 100 %),
 y así se desbloquea la siguiente. El progreso se guarda en el dispositivo.
 
+**Salidas** (se activan y desactivan en cualquier momento, también durante una lección):
+🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna del móvil.
+La vibración y la linterna funcionan en Chrome para Android (la linterna pide permiso
+de cámara y necesita HTTPS); Safari en iPhone no permite ninguna de las dos.
+
 **Además**
 
 - **Práctica**: recepción de elementos al azar, copia de grupos de 5 caracteres
   (estilo método Koch) y envío libre con decodificación en tiempo real.
 - **Traductor** texto ↔ Morse, con reproducción por sonido, luz (pantalla) o vibración.
 - **Tabla** de referencia con todos los caracteres, prosignos, códigos Q y abreviaturas.
-- **Ajustes**: velocidad de caracteres y velocidad efectiva (espaciado Farnsworth),
-  tono, volumen, velocidad de envío, vibración y opción de desbloquear todo.
+- **Ajustes**: temas Medianoche, Pizarra y Claro; timbre nítido o suave, velocidad de
+  caracteres y velocidad efectiva (espaciado Farnsworth), tono, volumen, velocidad de envío
+  y opción de desbloquear todo.
 
 ## Usarla
 
