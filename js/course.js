@@ -63,7 +63,7 @@
 
   const DEF = [
     {
-      id: 'letras', title: 'Letras', icon: '🔤', desc: 'El alfabeto completo, de dos en dos.',
+      id: 'letras', title: 'Alfabeto', icon: '🔤', desc: 'El alfabeto completo, de dos en dos.',
       subs: [
         { title: 'Primeros pasos', groups: [['E', 'T'], ['A', 'N'], ['I', 'M']] },
         { title: 'Cogiendo ritmo', groups: [['S', 'O'], ['U', 'R'], ['W', 'D']] },
@@ -125,47 +125,52 @@
     return ITEMS[text];
   }
 
+  // Preguntas necesarias (aciertos) para completar cada tipo de sesión.
+  const GOAL = { learn: 10, review: 15, challenge: 20 };
+  const LIVES = 3;
+  const MODES = ['receive', 'send'];
+
+  // Cada subsección: lecciones de dos en dos caracteres, un repaso y un
+  // desafío con vidas. Todas se juegan en recepción y en envío.
   function build() {
     const sections = [];
     const lessons = [];
     for (const sd of DEF) {
       const section = { id: sd.id, title: sd.title, icon: sd.icon, desc: sd.desc, subs: [], items: [] };
       const learned = [];
+      const num = { learn: 0, review: 0, challenge: 0 };
       sd.subs.forEach((sub, si) => {
         const s = { id: `${sd.id}-${si + 1}`, title: sub.title, lessons: [], items: [] };
-        sub.groups.forEach((g, gi) => {
+        const add = (type, extra) => {
+          num[type]++;
+          const name = { learn: 'Lección', review: 'Repaso', challenge: 'Desafío' }[type];
+          const l = Object.assign({
+            id: `${s.id}-${type[0]}${num[type]}`, type, section: sd.id, sectionTitle: sd.title,
+            num: num[type], title: `${name} ${num[type]}`, goal: GOAL[type]
+          }, extra);
+          s.lessons.push(l);
+        };
+        sub.groups.forEach((g) => {
           const newItems = g.map(item);
           learned.push(...newItems);
           s.items.push(...newItems);
-          s.lessons.push({
-            id: `${s.id}-${gi + 1}`, type: 'learn', section: sd.id,
-            title: newItems.map(label).join(' · '), newItems, pool: learned.slice()
-          });
+          // Con un solo carácter nuevo se repasa junto al anterior.
+          const choices = newItems.length > 1 ? newItems : learned.slice(-2);
+          add('learn', { newItems, items: choices });
         });
-        s.lessons.push({
-          id: `${s.id}-r`, type: 'review', section: sd.id,
-          title: `Repaso: ${sub.title}`, items: s.items.slice(), pool: learned.slice()
-        });
+        add('review', { items: s.items.slice() });
+        add('challenge', { items: s.items.slice() });
         section.subs.push(s);
         section.items.push(...s.items);
       });
-      section.challenge = {
-        id: `${sd.id}-c`, type: 'challenge', section: sd.id,
-        title: `Desafío: ${sd.title}`, items: section.items.slice(), pool: section.items.slice()
-      };
       for (const s of section.subs) lessons.push(...s.lessons);
-      lessons.push(section.challenge);
       sections.push(section);
     }
     lessons.forEach((l, i) => { l.index = i; });
     return { sections, lessons, items: ITEMS };
   }
 
-  function label(it) {
-    return it.text;
-  }
-
-  // ------------------------------------------------------------ Ejercicios
+  // ------------------------------------------------------------ Preguntas
 
   function shuffle(arr, rng) {
     const a = arr.slice();
@@ -176,70 +181,34 @@
     return a;
   }
 
-  function pick(arr, rng) {
-    return arr[Math.floor(rng() * arr.length)];
-  }
+  // Máximo de botones de respuesta en recepción.
+  const MAX_OPTIONS = 4;
 
-  function symbolCount(it) {
-    return it.morse.split(/\s+/).filter((p) => p !== '/').length;
-  }
-
-  // Envío solo para elementos de una palabra y pocos símbolos.
-  function canSend(it) {
-    return !/\s/.test(it.text) && symbolCount(it) <= 4;
-  }
-
-  function canRead(it) {
-    return symbolCount(it) <= 3;
-  }
-
-  function options(it, pool, rng, n = 4) {
-    const others = shuffle(pool.filter((p) => p !== it), rng).slice(0, n - 1);
-    return shuffle([it, ...others], rng);
-  }
-
-  function exercise(type, it, pool, rng) {
-    const ex = { type, item: it };
-    if (type === 'listen-choose' || type === 'read-choose') ex.options = options(it, pool, rng);
-    return ex;
-  }
-
-  function drillTypes(it, opts) {
-    const t = ['listen-choose', 'listen-type'];
-    if (canRead(it)) t.push('read-choose');
-    if (opts.send && canSend(it)) t.push('send');
-    return t;
-  }
-
-  function randomDrill(it, pool, opts, rng) {
-    return exercise(pick(drillTypes(it, opts), rng), it, pool, rng);
-  }
-
-  // opts: { send: bool, rng: () => number }
-  function makeExercises(lesson, opts) {
-    const rng = opts.rng || Math.random;
-    const pool = lesson.pool;
-
-    if (lesson.type === 'learn') {
-      const intros = lesson.newItems.map((it) => ({ type: 'intro', item: it }));
-      const drills = [];
-      for (const it of lesson.newItems) {
-        for (const t of drillTypes(it, opts)) drills.push(exercise(t, it, pool, rng));
-        drills.push(exercise('listen-choose', it, pool, rng));
+  // Devuelve una función que genera la siguiente pregunta de la sesión,
+  // sin repetir el mismo elemento dos veces seguidas.
+  function questions(lesson, rng) {
+    rng = rng || Math.random;
+    const pool = lesson.items;
+    let last = null;
+    return function next() {
+      let it;
+      do { it = pool[Math.floor(rng() * pool.length)]; } while (pool.length > 1 && it === last);
+      last = it;
+      let options = pool;
+      if (pool.length > MAX_OPTIONS) {
+        options = [it, ...shuffle(pool.filter((p) => p !== it), rng).slice(0, MAX_OPTIONS - 1)];
       }
-      const extra = Math.min(4, pool.length);
-      for (let i = 0; i < extra; i++) drills.push(randomDrill(pick(pool, rng), pool, opts, rng));
-      return intros.concat(shuffle(drills, rng));
-    }
+      return { item: it, options: shuffle(options, rng) };
+    };
+  }
 
-    const count = lesson.type === 'challenge' ? 20 : 15;
-    const drills = [];
-    for (let i = 0; i < count; i++) {
-      // En los repasos, dos tercios de los ejercicios son de la subsección.
-      const src = lesson.type === 'review' && rng() < 0.33 ? pool : lesson.items;
-      drills.push(randomDrill(pick(src, rng), pool, opts, rng));
-    }
-    return drills;
+  // Estrellas según la precisión: 3 sin fallos, 2 desde el 90 %, 1 al completar.
+  function stars(correct, total, failed) {
+    if (failed || !total) return 0;
+    const p = correct / total;
+    if (p >= 1) return 3;
+    if (p >= 0.9) return 2;
+    return 1;
   }
 
   // Compara respuestas escritas: sin tildes, sin < >, espacios normalizados.
@@ -248,16 +217,7 @@
     return n(a) === n(b);
   }
 
-  function stars(correct, total) {
-    if (!total) return 0;
-    const p = correct / total;
-    if (p >= 1) return 3;
-    if (p >= 0.9) return 2;
-    if (p >= 0.8) return 1;
-    return 0;
-  }
-
-  const api = { build, makeExercises, sameText, stars, canSend, shuffle, MEANINGS };
+  const api = { build, questions, sameText, stars, shuffle, GOAL, LIVES, MODES, MEANINGS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Course = api;
 })(typeof window !== 'undefined' ? window : globalThis);

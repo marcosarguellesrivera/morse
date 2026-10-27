@@ -6,28 +6,19 @@ Se puede instalar en el móvil como si fuera una app (PWA).
 
 ## Qué incluye
 
-**Curso guiado (73 lecciones en 6 secciones)**
+**Curso guiado en 6 secciones** (Alfabeto, Números, Puntuación, Palabras y abreviaturas,
+Prosignos, Códigos Q y QSO). Cada subsección tiene lecciones de dos en dos caracteres,
+un **repaso** y un **desafío con 3 vidas**, y todas se pueden hacer en dos modos:
 
-| Sección | Contenido |
-|---|---|
-| 🔤 Letras | Todo el alfabeto (incluida la Ñ), de dos en dos |
-| 🔢 Números | Del 0 al 9 |
-| ❓ Puntuación | `. , ? / = - ' ( ) @ :` |
-| 💬 Palabras y abreviaturas | Palabras cortas y comunes, jerga CW (CQ, 73, TNX, RST, OM, FB…) |
-| 📡 Prosignos | AR, SK, BT, KN, AS, SOS, HH, KA |
-| 📻 Códigos Q y QSO | QTH, QRZ, QSL, QRM, QRS… y un contacto (QSO) completo |
+- **Recepción**: suena el código y eliges el carácter entre botones grandes. El ojo
+  muestra el patrón (una vez) y el botón ▶ lo repite.
+- **Envío**: aparece el carácter y lo transmites manteniendo pulsada la zona inferior
+  (o la barra espaciadora). La app aprende tu velocidad mientras manipulas y comprueba
+  cada punto y raya al momento, sin esperar pausas entre letras.
 
-Cada subsección tiene lecciones para aprender elementos nuevos y un **repaso**;
-cada sección termina con un **desafío** con 3 vidas. Las lecciones combinan:
-
-- Presentación del elemento (sonido + patrón visual + significado)
-- Escuchar y elegir la respuesta
-- Leer el patrón y elegir
-- Escuchar y escribir
-- Transmitir con el manipulador en pantalla (o la barra espaciadora)
-
-Se necesita un 80 % de aciertos para superar una lección (★ 80 %, ★★ 90 %, ★★★ 100 %),
-y así se desbloquea la siguiente. El progreso se guarda en el dispositivo.
+Arriba se ven los aciertos/respuestas, la barra de progreso hasta el objetivo de la
+sesión y la racha 🔥. Las estrellas dependen de la precisión, y superar una lección en
+cualquiera de los dos modos desbloquea la siguiente.
 
 **Salidas** (se activan y desactivan en cualquier momento, también durante una lección):
 🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna del móvil.

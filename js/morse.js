@@ -345,11 +345,103 @@
 
   // ---------------------------------------------------------- Manipulador
 
-  // Decodifica pulsaciones de un manipulador recto. Umbrales en unidades:
-  // pulsación < 2 → punto; silencio ≥ 3 → fin de letra; ≥ 7 → fin de palabra.
+  // Aprende la velocidad real de quien manipula. Guarda las últimas
+  // pulsaciones y busca el salto natural entre cortas (puntos) y largas
+  // (rayas); el umbral queda en medio. Si aún no hay de los dos tipos,
+  // usa la última estimación de la duración del punto.
+  class AdaptiveTimer {
+    constructor(unitMs) {
+      this.base = unitMs;
+      this.dot = unitMs;
+      this.dash = 3 * unitMs;
+      this.history = [];
+    }
+
+    get threshold() {
+      const split = this._split();
+      return split ? split.threshold : 2 * this.dot;
+    }
+
+    // Divide el historial en dos grupos si hay un salto de al menos ×2.
+    _split() {
+      const v = this.history.slice().sort((a, b) => a - b);
+      let best = null;
+      for (let i = 1; i < v.length; i++) {
+        const ratio = v[i] / v[i - 1];
+        if (ratio >= 2 && (!best || ratio > best.ratio)) best = { ratio, i };
+      }
+      if (!best) return null;
+      const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      const dots = v.slice(0, best.i);
+      const dashes = v.slice(best.i);
+      return { dot: mean(dots), dash: mean(dashes), threshold: Math.sqrt(v[best.i - 1] * v[best.i]) };
+    }
+
+    classify(ms) {
+      const el = ms < this.threshold ? '.' : '-';
+      this.history.push(ms);
+      if (this.history.length > 16) this.history.shift();
+      const split = this._split();
+      if (split) {
+        this.dot = split.dot;
+        this.dash = split.dash;
+      } else if (el === '.') {
+        this.dot += 0.3 * (ms - this.dot);
+      } else {
+        this.dot += 0.3 * (ms / 3 - this.dot);
+      }
+      return el;
+    }
+
+    // Silencio que separa letras, en ms.
+    get letterGap() {
+      return 3 * this.dot;
+    }
+  }
+
+  // Comprueba el envío elemento a elemento contra el objetivo. Las letras se
+  // separan siguiendo el objetivo, así que no hace falta esperar a la pausa:
+  // en cuanto se completa la última letra se da por buena, y en cuanto un
+  // elemento no encaja se marca el fallo.
+  class SendJudge {
+    constructor(targetMorse) {
+      this.target = String(targetMorse).split(/\s+/).filter((p) => p && p !== '/');
+      this.reset();
+    }
+
+    reset() {
+      this.index = 0; // letra del objetivo en curso
+      this.current = ''; // elementos enviados de esa letra
+      this.sent = []; // letras ya completadas
+      this.state = 'progress';
+    }
+
+    feed(el) {
+      if (this.state !== 'progress') return this.state;
+      const want = this.target[this.index];
+      this.current += el;
+      if (!want.startsWith(this.current)) {
+        this.state = 'bad';
+      } else if (this.current === want) {
+        this.sent.push(this.current);
+        this.current = '';
+        this.index++;
+        if (this.index === this.target.length) this.state = 'ok';
+      }
+      return this.state;
+    }
+
+    // Lo enviado hasta ahora, en formato encode().
+    morse() {
+      return this.sent.concat(this.current ? [this.current] : []).join(' ');
+    }
+  }
+
+  // Decodifica pulsaciones de un manipulador recto, adaptándose a la velocidad:
+  // silencio ≥ 3 puntos → fin de letra; ≥ 7 → fin de palabra.
   class Keyer {
     constructor(opts) {
-      this.unit = opts.unitMs;
+      this.timer = new AdaptiveTimer(opts.unitMs);
       this.onChange = opts.onChange || (() => {});
       this.onIdle = opts.onIdle || null;
       this.reset();
@@ -375,10 +467,11 @@
       if (this.downAt === null) return;
       const d = now - this.downAt;
       this.downAt = null;
-      this.current += d < 2 * this.unit ? '.' : '-';
+      this.current += this.timer.classify(d);
       this.emit();
-      this.letterTimer = setTimeout(() => this.endLetter(), 3 * this.unit);
-      this.wordTimer = setTimeout(() => this.endWord(), 7 * this.unit);
+      const dot = this.timer.dot;
+      this.letterTimer = setTimeout(() => this.endLetter(), 3 * dot);
+      this.wordTimer = setTimeout(() => this.endWord(), 7 * dot);
     }
 
     endLetter() {
@@ -424,7 +517,7 @@
 
   const api = {
     CHARS, PROSIGNS, normalize, tokenize, patternOf, encode, decode, decodeLetter,
-    isMorse, cleanMorse, timing, timeline, duration, Player, Torch, Keyer, decodeTimings
+    isMorse, cleanMorse, timing, timeline, duration, Player, Torch, AdaptiveTimer, SendJudge, Keyer, decodeTimings
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

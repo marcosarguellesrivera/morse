@@ -10,7 +10,7 @@
   // ------------------------------------------------------------ Estado
 
   const DEFAULTS = {
-    v: 2, wpm: 18, eff: 10, freq: 700, volume: 0.85, wave: 'clear', sendWpm: 8,
+    v: 3, wpm: 18, eff: 10, freq: 700, volume: 0.85, wave: 'clear', sendWpm: 12,
     send: true, vibrate: false, unlockAll: false, theme: 'midnight',
     // Salidas activas al reproducir: sonido, vibración, destello de pantalla y linterna.
     out: { sound: true, vibrate: false, flash: false, torch: false }
@@ -28,6 +28,11 @@
       settings.v = DEFAULTS.v;
       if (saved.freq === 650) settings.freq = DEFAULTS.freq;
       settings.volume = Math.max(settings.volume, DEFAULTS.volume);
+    }
+    // La versión 3 parte de un envío más rápido; el temporizador se adapta después.
+    if (raw.settings && (saved.v || 1) < 3) {
+      settings.v = DEFAULTS.v;
+      if (saved.sendWpm === 8 || saved.sendWpm === undefined) settings.sendWpm = DEFAULTS.sendWpm;
     }
     return { settings, progress: raw.progress || {} };
   }
@@ -100,11 +105,34 @@
     return player.play(morse, playOpts(extra));
   }
 
+  // Iconos de trazo (24×24), dibujados para esta app.
+  const ICONS = {
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+    eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/>',
+    gear: '<circle cx="12" cy="12" r="8.2" stroke-width="3.6" stroke-dasharray="3.2 3.24" stroke-linecap="butt"/><circle cx="12" cy="12" r="5.6" stroke-width="3.4"/>',
+    vibrate: '<rect x="8" y="4" width="8" height="16" rx="1.5"/><path d="M4.5 8v8M2 10v4M19.5 8v8M22 10v4"/>',
+    screen: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/>',
+    sound: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
+    torch: '<path d="M7 3h10l-2 6v12h-6V9z"/><path d="M12 13v2"/>',
+    down: '<path d="M6 9l6 6 6-6"/>',
+    up: '<path d="M6 15l6-6 6 6"/>',
+    flame: '<path d="M12 2.5c1 3.5 5.5 6 5.5 11a5.5 5.5 0 01-11 0c0-2.6 1.4-4.2 2.6-5.5.2 1.8.9 2.9 2 3.4C11 9 10.8 5.5 12 2.5z" fill="currentColor"/>',
+    heart: '<path d="M12 20.5S3 15 3 8.8A4.6 4.6 0 0112 7a4.6 4.6 0 019 1.8C21 15 12 20.5 12 20.5z" fill="currentColor"/>'
+  };
+
+  function icon(name, cls) {
+    const el = h('span', { class: 'ico ' + (cls || ''), 'aria-hidden': 'true' });
+    el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+    return el;
+  }
+
   const OUTPUTS = [
-    ['sound', '🔊', 'Sonido'],
-    ['vibrate', '📳', 'Vibración'],
-    ['flash', '⚡', 'Destello de pantalla'],
-    ['torch', '🔦', 'Linterna']
+    ['vibrate', 'vibrate', 'Vibración'],
+    ['flash', 'screen', 'Destello de pantalla'],
+    ['sound', 'sound', 'Sonido'],
+    ['torch', 'torch', 'Linterna']
   ];
 
   function setOutput(key, on, btn) {
@@ -132,13 +160,16 @@
     btn.setAttribute('aria-pressed', String(on));
   }
 
-  // Barra para activar o desactivar las salidas durante la sesión.
+  function outputButtons() {
+    return OUTPUTS.map(([key, ico, label]) => h('button', {
+      class: 'tool', title: label, 'aria-label': label, 'aria-pressed': String(!!S.out[key]),
+      onclick: (e) => setOutput(key, !S.out[key], e.currentTarget)
+    }, icon(ico)));
+  }
+
+  // Barra para activar o desactivar las salidas fuera de las lecciones.
   function outputsBar() {
-    return h('div', { class: 'outputs', role: 'group', 'aria-label': 'Salidas' },
-      OUTPUTS.map(([key, icon, label]) => h('button', {
-        class: 'out-btn', title: label, 'aria-label': label, 'aria-pressed': String(!!S.out[key]),
-        onclick: (e) => setOutput(key, !S.out[key], e.currentTarget)
-      }, icon)));
+    return h('div', { class: 'outputs', role: 'group', 'aria-label': 'Salidas' }, outputButtons());
   }
 
   function onCleanup(fn) {
@@ -147,24 +178,31 @@
 
   // ------------------------------------------------------------ Progreso
 
-  function starsOf(lesson) {
-    return store.progress[lesson.id] || 0;
+  const MODE_NAME = { receive: 'RECEPCIÓN', send: 'ENVÍO' };
+
+  function starsOf(lesson, mode) {
+    return store.progress[`${lesson.id}:${mode}`] || 0;
   }
 
+  function passed(lesson) {
+    return Course.MODES.some((m) => starsOf(lesson, m) > 0);
+  }
+
+  function complete(lesson) {
+    return Course.MODES.every((m) => starsOf(lesson, m) > 0);
+  }
+
+  // Una lección se abre al superar la anterior en cualquiera de los dos modos.
   function unlocked(lesson) {
     if (S.unlockAll || lesson.index === 0) return true;
-    return starsOf(COURSE.lessons[lesson.index - 1]) > 0 || starsOf(lesson) > 0;
-  }
-
-  function doneCount() {
-    return COURSE.lessons.filter((l) => starsOf(l) > 0).length;
+    return passed(COURSE.lessons[lesson.index - 1]) || passed(lesson);
   }
 
   function learnedItems() {
     const seen = new Set();
     const out = [];
     for (const l of COURSE.lessons) {
-      if (!starsOf(l) || l.type !== 'learn') continue;
+      if (!passed(l) || l.type !== 'learn') continue;
       for (const it of l.newItems) if (!seen.has(it)) { seen.add(it); out.push(it); }
     }
     return out;
@@ -235,32 +273,50 @@
 
   function pathNode(lesson, pos, next) {
     const open = unlocked(lesson);
-    const st = starsOf(lesson);
     const current = lesson === next;
-    const cls = ['node', lesson.type, open ? 'open' : 'locked', st ? 'done' : '', current ? 'current' : ''].join(' ');
+    const cls = ['node', lesson.type, open ? 'open' : 'locked',
+      complete(lesson) ? 'done' : passed(lesson) ? 'half' : '', current ? 'current' : ''].join(' ');
     return h('div', { class: 'node-wrap', style: `--x:${PATH[pos % PATH.length]}` },
-      current && h('div', { class: 'bubble' }, starsOf(COURSE.lessons[0]) ? 'CONTINUAR' : 'EMPEZAR'),
+      current && h('div', { class: 'bubble' }, passed(COURSE.lessons[0]) ? 'CONTINUAR' : 'EMPEZAR'),
       h('button', {
         class: cls, disabled: !open, 'aria-label': lesson.title,
-        onclick: () => startLesson(lesson)
+        onclick: () => modeSheet(lesson)
       }, open ? nodeFace(lesson) : '🔒'),
-      st > 0 && starsEl(st),
+      open && h('div', { class: 'mode-dots' },
+        Course.MODES.map((m) => h('span', { class: starsOf(lesson, m) ? 'on' : '', title: MODE_NAME[m] }))),
       h('div', { class: 'node-title' }, lesson.title));
+  }
+
+  // Al tocar una lección se elige entre recepción y envío.
+  function modeSheet(lesson) {
+    const close = () => sheet.remove();
+    const sheet = h('div', { class: 'sheet-back', onclick: (e) => { if (e.target === sheet) close(); } },
+      h('div', { class: 'sheet', role: 'dialog', 'aria-label': lesson.title },
+        h('p', { class: 'sheet-sub' }, lesson.sectionTitle),
+        h('h2', {}, lesson.title),
+        lesson.newItems && h('p', { class: 'muted' }, 'Caracteres: ', lesson.newItems.map((i) => i.text).join('  ')),
+        lesson.type === 'challenge' && h('p', { class: 'muted' }, `${Course.LIVES} vidas · ${lesson.goal} aciertos para superarlo`),
+        Course.MODES.map((m) => h('button', {
+          class: 'mode-btn', onclick: () => { close(); startLesson(lesson, m); }
+        }, h('span', {}, MODE_NAME[m]), starsEl(starsOf(lesson, m)))),
+        h('button', { class: 'btn ghost', onclick: close }, 'Cancelar')));
+    document.body.append(sheet);
+    onCleanup(close);
   }
 
   function renderCourse() {
     const total = COURSE.lessons.length;
-    const done = doneCount();
-    const starTotal = COURSE.lessons.reduce((a, l) => a + starsOf(l), 0);
-    const next = COURSE.lessons.find((l) => !starsOf(l) && unlocked(l));
+    const done = COURSE.lessons.filter(passed).length;
+    const starTotal = COURSE.lessons.reduce((a, l) => a + starsOf(l, 'receive') + starsOf(l, 'send'), 0);
+    const next = COURSE.lessons.find((l) => !passed(l) && unlocked(l));
     view.append(
       h('section', { class: 'stats' },
         h('div', {}, h('strong', {}, done), h('span', {}, 'lecciones')),
         h('div', {}, h('strong', {}, `★ ${starTotal}`), h('span', {}, 'estrellas')),
         h('div', {}, h('strong', {}, `${Math.round((done / total) * 100)} %`), h('span', {}, 'del curso'))));
     COURSE.sections.forEach((sec, si) => {
-      const ls = sec.subs.flatMap((s) => s.lessons).concat(sec.challenge);
-      const d = ls.filter((l) => starsOf(l) > 0).length;
+      const ls = sec.subs.flatMap((s) => s.lessons);
+      const d = ls.filter(passed).length;
       let pos = 0;
       view.append(
         h('section', { class: `unit unit-${si % 6}`, id: `sec-${sec.id}` },
@@ -274,8 +330,7 @@
           sec.subs.map((sub) => [
             h('div', { class: 'divider' }, h('span', {}, sub.title)),
             h('div', { class: 'path' }, sub.lessons.map((l) => pathNode(l, pos++, next)))
-          ]),
-          h('div', { class: 'path' }, pathNode(sec.challenge, 0, next))));
+          ])));
     });
     // Llevar a la vista la lección en curso.
     const cur = view.querySelector('.node.current');
@@ -284,213 +339,302 @@
 
   // ------------------------------------------------------------ Lección
 
-  function startLesson(lesson) {
+  // El cronómetro de envío recuerda la velocidad aprendida entre preguntas.
+  let sendTimer = null;
+
+  function startLesson(lesson, mode) {
     state.run = {
-      lesson,
-      exs: Course.makeExercises(lesson, { send: S.send }),
-      i: 0, correct: 0, scored: 0,
-      lives: lesson.type === 'challenge' ? 3 : null,
+      lesson, mode,
+      next: Course.questions(lesson),
+      intro: lesson.type === 'learn' ? lesson.newItems.slice() : [],
+      correct: 0, answered: 0, streak: 0, best: 0,
+      lives: lesson.type === 'challenge' ? Course.LIVES : null,
       finished: false
     };
+    if (!sendTimer || sendTimer.base !== 1200 / S.sendWpm) sendTimer = new Morse.AdaptiveTimer(1200 / S.sendWpm);
     go('lesson');
   }
 
   function renderLesson() {
     const run = state.run;
     if (!run) return go('course');
-    const done = run.finished || run.i >= run.exs.length || run.lives === 0;
-    view.append(
-      h('div', { class: 'lesson-top' },
-        h('button', { class: 'icon-btn', 'aria-label': 'Salir', onclick: () => go('course') }, '✕'),
-        h('div', { class: 'bar' }, h('div', { style: `width:${(Math.min(run.i, run.exs.length) / run.exs.length) * 100}%` })),
-        run.lives !== null && h('span', { class: 'lives' }, '❤'.repeat(run.lives) + '♡'.repeat(3 - run.lives))),
-      !done && outputsBar()
-    );
-    if (done) return renderResult(run);
-    const ex = run.exs[run.i];
-    const body = h('div', { class: 'exercise' });
-    view.append(body);
-    ({
-      intro: exIntro, 'listen-choose': exListenChoose, 'read-choose': exReadChoose,
-      'listen-type': exListenType, send: exSend
-    })[ex.type](ex, body);
-  }
+    if (run.finished) return renderResult(run);
+    const L = run.lesson;
 
-  function nextExercise() {
-    state.run.i++;
-    render();
-  }
-
-  // Registra la respuesta y muestra el panel de corrección.
-  function answer(ex, body, ok, detail) {
-    const run = state.run;
-    if (body.dataset.answered) return;
-    body.dataset.answered = '1';
-    run.scored++;
-    if (ok) run.correct++;
-    else if (run.lives !== null) run.lives--;
-    body.querySelectorAll('button.opt, input, .key').forEach((b) => { b.disabled = true; });
-    const panel = h('div', { class: `feedback ${ok ? 'ok' : 'bad'}` },
-      h('strong', { class: 'fb-title' }, ok ? '✔ ¡Correcto!' : '✘ Incorrecto'),
-      detail,
-      !ok && h('div', { class: 'solution' },
-        h('span', { class: 'big-label small' }, ex.item.text), patternEl(ex.item.morse)),
-      ex.item.meaning && h('p', { class: 'muted' }, ex.item.meaning),
-      h('button', { class: 'btn primary', onclick: nextExercise }, 'Continuar'));
-    body.append(panel);
-    panel.querySelector('button').focus({ preventScroll: true });
-    if (!ok || ex.type === 'read-choose') playMorse(ex.item.morse);
-    if (S.vibrate && navigator.vibrate) navigator.vibrate(ok ? 30 : [60, 60, 60]);
-  }
-
-  function playButton(item, big) {
-    return h('button', {
-      class: 'play-btn' + (big ? ' big' : ''), 'aria-label': 'Reproducir',
-      onclick: () => playMorse(item.morse)
-    }, '▶');
-  }
-
-  function exIntro(ex, body) {
-    const it = ex.item;
-    body.append(
-      h('p', { class: 'prompt' }, 'Nuevo elemento'),
-      h('div', { class: 'big-label' }, it.text),
-      patternEl(it.morse, 'large'),
-      it.meaning && h('p', { class: 'meaning' }, it.meaning),
-      h('p', { class: 'muted' }, 'Escúchalo varias veces y fíjate en su ritmo.'),
-      playButton(it, true),
-      h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: nextExercise }, 'Entendido')));
-    playMorse(it.morse);
-  }
-
-  function optionButtons(ex, body, showPattern) {
-    return h('div', { class: 'options' + (ex.options.some((o) => o.text.length > 6) ? ' wide' : '') },
-      ex.options.map((o) => h('button', {
-        class: 'opt',
-        onclick: (e) => {
-          const ok = o === ex.item;
-          e.currentTarget.classList.add(ok ? 'right' : 'wrong');
-          body.querySelectorAll('button.opt').forEach((b, i) => {
-            if (ex.options[i] === ex.item) b.classList.add('right');
-          });
-          answer(ex, body, ok);
-        }
-      }, showPattern ? patternEl(o.morse) : o.text)));
-  }
-
-  function exListenChoose(ex, body) {
-    body.append(
-      h('p', { class: 'prompt' }, '¿Qué has oído?'),
-      playButton(ex.item, true),
-      optionButtons(ex, body, false));
-    playMorse(ex.item.morse);
-  }
-
-  function exReadChoose(ex, body) {
-    body.append(
-      h('p', { class: 'prompt' }, '¿Qué representa este código?'),
-      patternEl(ex.item.morse, 'large'),
-      optionButtons(ex, body, false));
-  }
-
-  function exListenType(ex, body) {
-    const single = ex.item.text.length === 1;
-    const input = h('input', {
-      class: 'answer-input', type: 'text', autocomplete: 'off', autocapitalize: 'characters',
-      spellcheck: 'false', placeholder: 'Escribe lo que oyes',
-      oninput: () => { if (single && input.value.trim()) check(); },
-      onkeydown: (e) => { if (e.key === 'Enter') check(); }
-    });
-    const check = () => {
-      if (!input.value.trim()) return;
-      const ok = Course.sameText(input.value, ex.item.text);
-      answer(ex, body, ok, !ok && h('p', {}, `Escribiste: ${input.value.toUpperCase()}`));
+    // Cabecera
+    const hearts = run.lives !== null && h('div', { class: 'hearts' });
+    const drawHearts = () => {
+      if (!hearts) return;
+      hearts.replaceChildren(...Array.from({ length: Course.LIVES }, (_, i) => icon('heart', i < run.lives ? 'on' : '')));
     };
-    body.append(
-      h('p', { class: 'prompt' }, 'Escucha y escribe'),
-      playButton(ex.item, true),
-      input,
-      !single && h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: check }, 'Comprobar')));
-    playMorse(ex.item.morse);
-    setTimeout(() => input.focus(), 50);
+    drawHearts();
+    // Franja de progreso: aciertos/respondidas, barra hasta el objetivo y racha.
+    const count = h('span', { class: 'count' });
+    const fill = h('div', {});
+    const streak = h('span', { class: 'streak' });
+    const drawStrip = () => {
+      count.textContent = `${run.correct}/${run.answered}`;
+      fill.style.width = `${Math.min(1, run.correct / L.goal) * 100}%`;
+      streak.replaceChildren(icon('flame'), String(run.streak));
+      streak.classList.toggle('hot', run.streak > 0);
+    };
+    drawStrip();
+
+    // Tarjeta central
+    const prompt = h('p', { class: 'card-prompt' });
+    const big = h('div', { class: 'card-big' });
+    const pat = h('div', { class: 'card-pattern' });
+    const eyeBtn = h('button', { class: 'round-btn', 'aria-label': 'Mostrar código' });
+    const playBtn = h('button', { class: 'round-btn', 'aria-label': 'Reproducir' }, icon('play'));
+    const card = h('div', { class: 'qcard' }, prompt, big, pat, h('div', { class: 'card-actions' }, eyeBtn, playBtn));
+
+    // Barra de herramientas
+    const tools = h('div', { class: 'toolbar' },
+      h('button', { class: 'tool', 'aria-label': 'Ajustes rápidos', onclick: quickSettings }, icon('gear')),
+      outputButtons(),
+      h('button', {
+        class: 'tool', 'aria-label': 'Plegar barra', onclick: (e) => {
+          const c = tools.classList.toggle('collapsed');
+          e.currentTarget.replaceChildren(icon(c ? 'up' : 'down'));
+        }
+      }, icon('down')));
+
+    const answers = h('div', { class: 'answers' });
+
+    view.append(h('div', { class: 'lesson' },
+      h('header', { class: 'lesson-head' },
+        h('button', { class: 'close-btn', 'aria-label': 'Salir', onclick: () => go('course') }, icon('close')),
+        h('div', { class: 'lesson-titles' },
+          h('div', { class: 'lesson-sub' }, `${L.sectionTitle} | ${L.title}`),
+          h('div', { class: 'lesson-mode' }, MODE_NAME[run.mode])),
+        hearts || h('span', { class: 'head-spacer' })),
+      h('div', { class: 'strip' }, count, h('div', { class: 'ybar' }, fill), streak),
+      h('div', { class: 'stage' }, card),
+      tools,
+      answers));
+
+    let q = null;
+    let busy = false;
+    const timers = [];
+    const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+    onCleanup(() => timers.forEach(clearTimeout));
+
+    const showPattern = (morse, cls) => pat.replaceChildren(patternEl(morse, cls || ''));
+    const setEye = (active, off) => {
+      eyeBtn.replaceChildren(icon(off ? 'eyeOff' : 'eye'));
+      eyeBtn.classList.toggle('active', active);
+      eyeBtn.disabled = !active;
+    };
+    const play = () => q && playMorse(q.item.morse);
+    playBtn.onclick = play;
+
+    // Presentación de los caracteres nuevos de la lección.
+    const intro = () => {
+      const it = run.intro.shift();
+      card.className = 'qcard intro';
+      prompt.textContent = 'Nuevo carácter';
+      big.textContent = it.text;
+      big.classList.toggle('long', it.text.length > 3);
+      showPattern(it.morse);
+      setEye(false);
+      q = { item: it };
+      playBtn.classList.add('active');
+      answers.className = 'answers single';
+      answers.replaceChildren(h('button', { class: 'answer', onclick: () => (run.intro.length ? intro() : ask()) }, 'Continuar'));
+      later(play, 250);
+    };
+
+    const finish = () => {
+      run.finished = true;
+      render();
+    };
+
+    // Registra el resultado, actualiza contadores y pasa a la siguiente pregunta.
+    const resolve = (ok, sent) => {
+      busy = true;
+      run.answered++;
+      if (ok) {
+        run.correct++;
+        run.streak++;
+        run.best = Math.max(run.best, run.streak);
+      } else {
+        run.streak = 0;
+        if (run.lives !== null) run.lives--;
+      }
+      drawStrip();
+      drawHearts();
+      card.classList.add(ok ? 'ok' : 'bad');
+      big.textContent = q.item.text;
+      if (S.vibrate && navigator.vibrate) navigator.vibrate(ok ? 30 : [60, 60, 60]);
+      const end = run.correct >= L.goal || run.lives === 0;
+      if (ok) {
+        later(end ? finish : ask, 650);
+      } else {
+        // Al fallar se muestra lo enviado (en rojo) y se oye la respuesta correcta.
+        pat.replaceChildren(sent ? patternEl(sent, 'bad') : '', patternEl(q.item.morse, 'ok'));
+        playMorse(q.item.morse).then(() => later(end ? finish : ask, 500));
+      }
+    };
+
+    const ask = () => {
+      busy = false;
+      q = run.next();
+      card.className = 'qcard';
+      big.classList.toggle('long', q.item.text.length > 3);
+      pat.replaceChildren();
+      playBtn.classList.add('active');
+      if (run.mode === 'receive') askReceive();
+      else askSend();
+    };
+
+    const askReceive = () => {
+      prompt.textContent = q.item.text.length > 1 && !q.item.text.startsWith('<') ? 'Identifica la palabra' : 'Identifica el carácter';
+      big.textContent = '?';
+      setEye(true);
+      eyeBtn.onclick = () => { showPattern(q.item.morse, 'muted-pattern'); setEye(false); };
+      const long = q.options.some((o) => o.text.length > 4);
+      answers.className = `answers n${q.options.length}${long ? ' long' : ''}`;
+      answers.replaceChildren(...q.options.map((o) => h('button', {
+        class: 'answer',
+        onclick: (e) => {
+          if (busy) return;
+          const ok = o === q.item;
+          e.currentTarget.classList.add(ok ? 'right' : 'wrong');
+          if (!ok) answers.querySelectorAll('.answer')[q.options.indexOf(q.item)].classList.add('right');
+          resolve(ok);
+        }
+      }, o.text)));
+      later(play, 300);
+    };
+
+    const askSend = () => {
+      prompt.textContent = 'Enviar señal';
+      big.textContent = q.item.text;
+      const judge = new Morse.SendJudge(q.item.morse);
+      let hinted = false;
+      let idle = null;
+      setEye(true, true);
+      eyeBtn.onclick = () => { hinted = true; setEye(false); draw(); };
+      const sentEl = h('div', { class: 'sent' });
+      const draw = (state) => {
+        const m = judge.morse();
+        if (!hinted || state) pat.replaceChildren(m ? patternEl(m, state || 'live') : '');
+        else pat.replaceChildren(patternEl(q.item.morse, 'muted-pattern'), sentEl);
+        if (hinted && !state) sentEl.replaceChildren(m ? patternEl(m, 'live') : '');
+      };
+      const pad = h('button', { class: 'pad', 'aria-label': 'Manipulador' }, 'Toca y mantén para enviar');
+      answers.className = 'answers single';
+      answers.replaceChildren(pad);
+      bindKey(pad, {
+        enabled: () => !busy,
+        down: () => clearTimeout(idle),
+        up: (ms) => {
+          const st = judge.feed(sendTimer.classify(ms));
+          if (st === 'progress') {
+            draw();
+            // Si se deja a medias, cuenta como fallo.
+            idle = setTimeout(() => {
+              if (busy) return;
+              resolve(false, judge.morse());
+            }, Math.max(1500, 7 * sendTimer.dot));
+            timers.push(idle);
+          } else if (st === 'ok') {
+            draw('ok');
+            resolve(true);
+          } else {
+            resolve(false, judge.morse());
+          }
+        }
+      });
+    };
+
+    if (run.intro.length) intro();
+    else ask();
   }
 
-  function exSend(ex, body) {
-    const target = ex.item.morse.split(/\s+/).filter((p) => p !== '/').join(' ');
-    const hint = h('div', { class: 'hint hidden' }, patternEl(ex.item.morse, 'large'));
-    const key = makeKey({
-      onIdle: (morse) => {
-        const sent = morse.split(/\s+/).filter((p) => p !== '/').join(' ');
-        if (!sent) return;
-        const ok = sent === target;
-        answer(ex, body, ok, !ok && h('div', { class: 'solution' },
-          h('span', { class: 'muted' }, 'Enviaste: '), patternEl(morse), ` (${Morse.decode(morse)})`));
-      }
-    });
-    body.append(
-      h('p', { class: 'prompt' }, 'Transmite con el manipulador'),
-      h('div', { class: 'big-label' }, ex.item.text),
-      h('button', { class: 'btn ghost small', onclick: () => hint.classList.toggle('hidden') }, 'Ver pista'),
-      hint,
-      key.el);
+  // Ajustes rápidos dentro de la lección.
+  function quickSettings() {
+    const slider = (key, label, min, max, step, fmt) => {
+      const out = h('span', { class: 'val' }, fmt(S[key]));
+      return h('label', { class: 'field' }, h('span', { class: 'row between' }, label, out),
+        h('input', {
+          type: 'range', min, max, step, value: S[key],
+          oninput: (e) => {
+            S[key] = +e.target.value;
+            if (key === 'wpm' && S.eff > S.wpm) S.eff = S.wpm;
+            if (key === 'eff' && S.eff > S.wpm) S.wpm = S.eff;
+            out.textContent = fmt(S[key]);
+            save();
+          }
+        }));
+    };
+    const close = () => sheet.remove();
+    const sheet = h('div', { class: 'sheet-back', onclick: (e) => { if (e.target === sheet) close(); } },
+      h('div', { class: 'sheet' },
+        h('h2', {}, 'Ajustes'),
+        slider('wpm', 'Velocidad de caracteres', 5, 60, 1, (v) => `${v} ppm`),
+        slider('eff', 'Velocidad efectiva', 3, 60, 1, (v) => `${v} ppm`),
+        slider('freq', 'Tono', 300, 1200, 10, (v) => `${v} Hz`),
+        slider('volume', 'Volumen', 0.05, 1, 0.05, (v) => `${Math.round(v * 100)} %`),
+        h('button', { class: 'btn primary', onclick: close }, 'Listo')));
+    document.body.append(sheet);
+    onCleanup(close);
   }
 
   function renderResult(run) {
+    const L = run.lesson;
     const failed = run.lives === 0;
-    const st = failed ? 0 : Course.stars(run.correct, run.scored);
-    const pct = run.scored ? Math.round((run.correct / run.scored) * 100) : 0;
-    if (!run.finished) {
-      run.finished = true;
-      if (st > starsOf(run.lesson)) {
-        store.progress[run.lesson.id] = st;
+    const st = Course.stars(run.correct, run.answered, failed);
+    const pct = run.answered ? Math.round((run.correct / run.answered) * 100) : 0;
+    if (!run.saved) {
+      run.saved = true;
+      const key = `${L.id}:${run.mode}`;
+      if (st > (store.progress[key] || 0)) {
+        store.progress[key] = st;
         save();
       }
     }
-    const next = COURSE.lessons[run.lesson.index + 1];
+    const next = COURSE.lessons[L.index + 1];
     view.append(
-      h('div', { class: 'exercise result' },
-        h('div', { class: 'result-icon' }, st ? '🎉' : '💪'),
-        h('h2', {}, st ? '¡Lección superada!' : failed ? 'Te has quedado sin vidas' : 'Casi lo tienes'),
+      h('div', { class: 'result' },
+        h('p', { class: 'lesson-sub' }, `${L.sectionTitle} | ${L.title}`),
+        h('div', { class: 'lesson-mode' }, MODE_NAME[run.mode]),
+        h('div', { class: 'result-icon' }, st ? '🎉' : '💔'),
+        h('h2', {}, st ? (L.type === 'challenge' ? '¡Desafío superado!' : '¡Lección completada!') : 'Te has quedado sin vidas'),
         starsEl(st),
-        h('p', {}, `${run.correct} de ${run.scored} aciertos (${pct} %)`),
-        !st && h('p', { class: 'muted' }, 'Necesitas un 80 % de aciertos para superar la lección.'),
-        st > 0 && next && unlocked(next) && h('button', { class: 'btn primary', onclick: () => startLesson(next) }, 'Siguiente lección'),
-        h('button', { class: 'btn' + (st ? '' : ' primary'), onclick: () => startLesson(run.lesson) }, 'Repetir'),
+        h('div', { class: 'result-stats' },
+          h('div', {}, h('strong', {}, `${pct} %`), h('span', {}, 'precisión')),
+          h('div', {}, h('strong', {}, `${run.correct}/${run.answered}`), h('span', {}, 'aciertos')),
+          h('div', {}, h('strong', {}, run.best), h('span', {}, 'mejor racha'))),
+        st > 0 && next && unlocked(next) && h('button', { class: 'btn primary', onclick: () => startLesson(next, run.mode) }, 'Siguiente'),
+        h('button', { class: 'btn' + (st ? '' : ' primary'), onclick: () => startLesson(L, run.mode) }, 'Repetir'),
         h('button', { class: 'btn ghost', onclick: () => go('course') }, 'Volver al curso')));
   }
 
-  // ------------------------------------------------------------ Manipulador
-
-  function makeKey(opts) {
-    const live = h('div', { class: 'key-live' });
-    const text = h('div', { class: 'key-text' });
-    const keyer = new Morse.Keyer({
-      unitMs: 1200 / S.sendWpm,
-      onChange: (st) => {
-        live.replaceChildren(st.morse ? patternEl(st.morse) : h('span', { class: 'muted' }, 'Pulsa la tecla'));
-        text.textContent = st.text;
-        if (opts.onChange) opts.onChange(st);
-      },
-      onIdle: opts.onIdle
-    });
-    const pad = h('button', { class: 'key', 'aria-label': 'Manipulador' }, h('span', {}, 'TECLA'));
+  // Conecta un botón como manipulador: tono y salidas mientras está pulsado,
+  // y avisa con la duración de cada pulsación. También con la barra espaciadora.
+  function bindKey(pad, opts) {
+    let downAt = null;
     const down = (e) => {
       if (e) e.preventDefault();
-      if (pad.disabled) return;
+      if (downAt !== null || (opts.enabled && !opts.enabled())) return;
+      downAt = performance.now();
       pad.classList.add('down');
       if (S.out.sound) player.toneOn(S.freq, S.volume, S.wave);
       if (S.out.vibrate && navigator.vibrate) navigator.vibrate(10000);
       light(true);
-      keyer.down(performance.now());
+      if (opts.down) opts.down();
     };
     const up = (e) => {
       if (e) e.preventDefault();
-      if (!pad.classList.contains('down')) return;
+      if (downAt === null) return;
+      const ms = performance.now() - downAt;
+      downAt = null;
       pad.classList.remove('down');
       player.toneOff();
       if (S.out.vibrate && navigator.vibrate) navigator.vibrate(0);
       light(false);
-      keyer.up(performance.now());
+      opts.up(ms);
     };
     pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); down(e); });
     pad.addEventListener('pointerup', up);
@@ -507,13 +651,35 @@
       document.removeEventListener('keydown', kd);
       document.removeEventListener('keyup', ku);
       player.toneOff();
-      keyer.reset();
+      light(false);
     });
+  }
+
+  // ------------------------------------------------------------ Manipulador
+
+  function makeKey(opts) {
+    const live = h('div', { class: 'key-live' });
+    const text = h('div', { class: 'key-text' });
+    const keyer = new Morse.Keyer({
+      unitMs: 1200 / S.sendWpm,
+      onChange: (st) => {
+        live.replaceChildren(st.morse ? patternEl(st.morse) : h('span', { class: 'muted' }, 'Pulsa la tecla'));
+        text.textContent = st.text;
+        if (opts.onChange) opts.onChange(st);
+      },
+      onIdle: opts.onIdle
+    });
+    const pad = h('button', { class: 'pad', 'aria-label': 'Manipulador' }, 'Toca y mantén para enviar');
+    bindKey(pad, {
+      down: () => keyer.down(performance.now()),
+      up: () => keyer.up(performance.now())
+    });
+    onCleanup(() => keyer.reset());
     const el = h('div', { class: 'keyer' },
       live, text, pad,
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost small', onclick: () => keyer.reset() }, 'Borrar'),
-        h('span', { class: 'muted small' }, `Envío a ${S.sendWpm} ppm · también con la barra espaciadora`)));
+        h('span', { class: 'muted small' }, 'Se adapta a tu velocidad · también con la barra espaciadora')));
     keyer.emit();
     return { el, keyer };
   }
@@ -788,12 +954,12 @@
       h('h1', {}, 'Ajustes'),
       h('section', { class: 'card' },
         h('h2', {}, 'Apariencia'),
-        choice('theme', 'Tema', [['midnight', 'Medianoche'], ['slate', 'Pizarra'], ['light', 'Claro']], applyTheme)),
+        choice('theme', 'Tema', [['midnight', 'Medianoche'], ['slate', 'Pizarra']], applyTheme)),
       h('section', { class: 'card' },
         h('h2', {}, 'Sonido'),
         choice('wave', 'Timbre', [['clear', 'Nítido (recomendado en móvil)'], ['sine', 'Suave (onda pura)']]),
-        slider('wpm', 'Velocidad de caracteres', 5, 40, 1, (v) => `${v} ppm`),
-        slider('eff', 'Velocidad efectiva (Farnsworth)', 3, 40, 1, (v) => `${v} ppm`),
+        slider('wpm', 'Velocidad de caracteres', 5, 60, 1, (v) => `${v} ppm`),
+        slider('eff', 'Velocidad efectiva (Farnsworth)', 3, 60, 1, (v) => `${v} ppm`),
         h('p', { class: 'muted small' }, 'Aprender con caracteres rápidos y más espacio entre ellos ayuda a reconocer el sonido de cada letra en vez de contar puntos y rayas.'),
         slider('freq', 'Tono', 300, 1200, 10, (v) => `${v} Hz`),
         slider('volume', 'Volumen', 0.05, 1, 0.05, (v) => `${Math.round(v * 100)} %`),
@@ -806,11 +972,10 @@
         h('p', { class: 'muted small' }, '🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna (pide permiso de cámara; solo en Android)')),
       h('section', { class: 'card' },
         h('h2', {}, 'Envío'),
-        slider('sendWpm', 'Velocidad de envío', 4, 30, 1, (v) => `${v} ppm`),
-        h('p', { class: 'muted small' }, 'Determina cuánto debe durar una raya y cuánto silencio separa letras y palabras al usar el manipulador.')),
+        slider('sendWpm', 'Velocidad de envío inicial', 4, 40, 1, (v) => `${v} ppm`),
+        h('p', { class: 'muted small' }, 'Punto de partida para distinguir puntos de rayas. Después la app se adapta sola a tu forma de manipular.')),
       h('section', { class: 'card' },
         h('h2', {}, 'Curso'),
-        toggle('send', 'Ejercicios de envío', 'Incluir ejercicios con el manipulador en las lecciones.'),
         toggle('vibrate', 'Vibrar al responder', 'Una vibración corta al acertar y tres al fallar.'),
         toggle('unlockAll', 'Desbloquear todo', 'Acceder a cualquier lección sin completar las anteriores.'),
         h('button', {
