@@ -108,11 +108,12 @@ test('estructura del curso', () => {
   for (const it of Object.values(c.items)) assert.ok(it.morse && !it.morse.includes('undefined'), it.text);
 });
 
-test('preguntas: opciones correctas y sin repetir seguidas', () => {
+test('preguntas: opciones correctas y como mucho dos iguales seguidas', () => {
   const c = Course.build();
   for (const l of c.lessons) {
     const next = Course.questions(l);
     let prev = null;
+    let prev2 = null;
     for (let i = 0; i < 30; i++) {
       const q = next();
       if (l.kb) {
@@ -123,7 +124,8 @@ test('preguntas: opciones correctas y sin repetir seguidas', () => {
         assert.ok(q.options.length >= 2 && q.options.length <= 4);
         assert.strictEqual(new Set(q.options).size, q.options.length);
       }
-      if (l.items.length > 1) assert.notStrictEqual(q.item, prev);
+      if (l.items.length > 1) assert.ok(!(q.item === prev && prev === prev2), `${l.id}: tres seguidas`);
+      prev2 = prev;
       prev = q.item;
     }
   }
@@ -134,6 +136,15 @@ test('en las lecciones las opciones no cambian de sitio', () => {
   const l = c.lessons.find((x) => x.type === 'learn' && x.subtitle === 'L & F');
   const next = Course.questions(l);
   for (let i = 0; i < 20; i++) assert.deepStrictEqual(next().options.map((o) => o.text), ['L', 'F']);
+});
+
+test('con dos letras el orden no es una alternancia fija', () => {
+  const c = Course.build();
+  const l = c.lessons[0]; // E & T
+  const next = Course.questions(l);
+  const seq = Array.from({ length: 200 }, () => next().item.text).join('');
+  assert.ok(/EE|TT/.test(seq), 'nunca se repite una letra');
+  assert.ok(!/EEE|TTT/.test(seq), 'más de dos seguidas');
 });
 
 test('comparación de respuestas escritas', () => {

@@ -197,15 +197,21 @@
   // Máximo de botones de respuesta cuando no hay teclado.
   const MAX_OPTIONS = 4;
 
-  // Devuelve una función que genera la siguiente pregunta de la sesión,
-  // sin repetir el mismo elemento dos veces seguidas.
+  // Como mucho, cuántas veces seguidas puede salir el mismo elemento.
+  const MAX_RUN = 2;
+
+  // Devuelve una función que genera la siguiente pregunta de la sesión. El
+  // orden es al azar (también con dos elementos, para que no se alternen),
+  // pero ninguno sale más de MAX_RUN veces seguidas.
   function questions(lesson, rng) {
     rng = rng || Math.random;
     const pool = lesson.items;
     let last = null;
+    let run = 0;
     return function next() {
       let it;
-      do { it = pool[Math.floor(rng() * pool.length)]; } while (pool.length > 1 && it === last);
+      do { it = pool[Math.floor(rng() * pool.length)]; } while (pool.length > 1 && it === last && run >= MAX_RUN);
+      run = it === last ? run + 1 : 1;
       last = it;
       if (lesson.kb) return { item: it, options: null };
       // Si caben todas, cada opción se queda en su sitio toda la sesión.
