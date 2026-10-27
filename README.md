@@ -6,28 +6,21 @@ Se puede instalar en el móvil como si fuera una app (PWA).
 
 ## Qué incluye
 
-**Curso guiado (73 lecciones en 6 secciones)**
+**Curso guiado en 6 secciones**: Caracteres (Alfabeto, Números y Puntuación), Palabras,
+frases y oraciones, Prosignos, Códigos Q, Abreviaturas y Conceptos básicos del QSO en CW.
+Cada subsección alterna lecciones (caracteres nuevos de dos en dos), repasos de todo lo
+aprendido y desafíos con 3 vidas: tras la lección 3 y luego cada dos lecciones.
 
-| Sección | Contenido |
-|---|---|
-| 🔤 Letras | Todo el alfabeto (incluida la Ñ), de dos en dos |
-| 🔢 Números | Del 0 al 9 |
-| ❓ Puntuación | `. , ? / = - ' ( ) @ :` |
-| 💬 Palabras y abreviaturas | Palabras cortas y comunes, jerga CW (CQ, 73, TNX, RST, OM, FB…) |
-| 📡 Prosignos | AR, SK, BT, KN, AS, SOS, HH, KA |
-| 📻 Códigos Q y QSO | QTH, QRZ, QSL, QRM, QRS… y un contacto (QSO) completo |
+Todas las sesiones se hacen en dos modos que avanzan por separado:
 
-Cada subsección tiene lecciones para aprender elementos nuevos y un **repaso**;
-cada sección termina con un **desafío** con 3 vidas. Las lecciones combinan:
+- **Recepción**: suena el código y eliges la respuesta. En las lecciones hay dos botones;
+  en repasos y desafíos, un teclado completo con solo lo aprendido activo. Se muestra la
+  solución durante 3 segundos y se pasa a la siguiente.
+- **Envío**: transmites el carácter manteniendo pulsada la zona inferior (o la barra
+  espaciadora). La app aprende tu velocidad y comprueba cada punto y raya al momento.
 
-- Presentación del elemento (sonido + patrón visual + significado)
-- Escuchar y elegir la respuesta
-- Leer el patrón y elegir
-- Escuchar y escribir
-- Transmitir con el manipulador en pantalla (o la barra espaciadora)
-
-Se necesita un 80 % de aciertos para superar una lección (★ 80 %, ★★ 90 %, ★★★ 100 %),
-y así se desbloquea la siguiente. El progreso se guarda en el dispositivo.
+Una sesión se supera con un 80 % de aciertos (sesiones de 20, 25 y 15 preguntas). La
+pantalla de Lecciones muestra el progreso de recepción, desafíos y envío y la racha de días.
 
 **Salidas** (se activan y desactivan en cualquier momento, también durante una lección):
 🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna del móvil.

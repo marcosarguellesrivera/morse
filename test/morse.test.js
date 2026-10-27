@@ -62,29 +62,69 @@ test('Keyer en tiempo real', async () => {
   assert.strictEqual(morse, '.-');
 });
 
+test('el umbral de punto/raya se adapta a quien manipula', () => {
+  const t = new Morse.AdaptiveTimer(150); // empieza esperando puntos de 150 ms
+  // Alguien que manipula mucho más rápido: puntos de 60 ms y rayas de 180 ms.
+  const seq = [60, 180, 60, 60, 180, 180, 60, 180];
+  for (let i = 0; i < 3; i++) seq.forEach((ms) => t.classify(ms));
+  assert.strictEqual(seq.map((ms) => t.classify(ms)).join(''), '.-..--.-');
+  assert.ok(t.threshold > 60 && t.threshold < 180);
+});
+
+test('SendJudge acepta sin esperar pausas y detecta fallos al momento', () => {
+  const ok = new Morse.SendJudge(Morse.encode('TNX'));
+  const states = [...'--.-..-'].map((e) => ok.feed(e));
+  assert.deepStrictEqual(states.slice(0, -1).every((s) => s === 'progress'), true);
+  assert.strictEqual(states.at(-1), 'ok');
+  assert.strictEqual(ok.morse(), '- -. -..-');
+
+  const bad = new Morse.SendJudge(Morse.encode('A'));
+  assert.strictEqual(bad.feed('.'), 'progress');
+  assert.strictEqual(bad.feed('.'), 'bad');
+});
+
 test('estructura del curso', () => {
   const c = Course.build();
-  assert.strictEqual(c.sections.length, 6);
+  assert.deepStrictEqual(c.sections.map((s) => s.title), [
+    'Caracteres', 'Palabras, frases y oraciones', 'Prosignos', 'Códigos Q', 'Abreviaturas',
+    'Conceptos básicos del QSO en CW'
+  ]);
   const ids = new Set(c.lessons.map((l) => l.id));
   assert.strictEqual(ids.size, c.lessons.length);
-  // Todas las letras del alfabeto aparecen en la sección de letras
-  const letters = c.sections[0].items.map((i) => i.text).join('');
+  // Alfabeto: 31 sesiones, 6 desafíos; tras el Desafío 3 viene la Lección 8 (L & F).
+  const alfa = c.sections[0].subs[0];
+  assert.strictEqual(alfa.title, 'Alfabeto');
+  assert.strictEqual(alfa.lessons.length, 31);
+  assert.strictEqual(alfa.lessons.filter((l) => l.type === 'challenge').length, 6);
+  const i = alfa.lessons.findIndex((l) => l.title === 'Desafío 3');
+  assert.strictEqual(alfa.lessons[i + 1].title, 'Lección 8');
+  assert.strictEqual(alfa.lessons[i + 1].subtitle, 'L & F');
+  assert.strictEqual(alfa.lessons[i + 2].type, 'review');
+  // Repasos y desafíos de letras usan teclado; cada subsección acaba en desafío.
+  assert.ok(alfa.lessons.filter((l) => l.type !== 'learn').every((l) => l.kb));
+  for (const sec of c.sections) for (const sub of sec.subs) assert.strictEqual(sub.lessons.at(-1).type, 'challenge');
+  const letters = alfa.lessons.flatMap((l) => l.newItems || []).map((i) => i.text).join('');
   for (const ch of 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ') assert.ok(letters.includes(ch), ch);
-  // Todos los elementos se pueden codificar
   for (const it of Object.values(c.items)) assert.ok(it.morse && !it.morse.includes('undefined'), it.text);
 });
 
-test('ejercicios: las opciones incluyen la respuesta correcta', () => {
+test('preguntas: opciones correctas y sin repetir seguidas', () => {
   const c = Course.build();
   for (const l of c.lessons) {
-    const exs = Course.makeExercises(l, { send: true });
-    assert.ok(exs.length > 0);
-    for (const ex of exs) {
-      if (ex.options) {
-        assert.ok(ex.options.includes(ex.item));
-        assert.strictEqual(new Set(ex.options).size, ex.options.length);
+    const next = Course.questions(l);
+    let prev = null;
+    for (let i = 0; i < 30; i++) {
+      const q = next();
+      if (l.kb) {
+        assert.strictEqual(q.options, null);
+        assert.ok(l.kb.join('').includes(q.item.text));
+      } else {
+        assert.ok(q.options.includes(q.item));
+        assert.ok(q.options.length >= 2 && q.options.length <= 4);
+        assert.strictEqual(new Set(q.options).size, q.options.length);
       }
-      if (ex.type === 'send') assert.ok(Course.canSend(ex.item));
+      if (l.items.length > 1) assert.notStrictEqual(q.item, prev);
+      prev = q.item;
     }
   }
 });
@@ -96,9 +136,9 @@ test('comparación de respuestas escritas', () => {
   assert.ok(!Course.sameText('E', 'T'));
 });
 
-test('estrellas', () => {
-  assert.strictEqual(Course.stars(10, 10), 3);
-  assert.strictEqual(Course.stars(9, 10), 2);
-  assert.strictEqual(Course.stars(8, 10), 1);
-  assert.strictEqual(Course.stars(7, 10), 0);
+test('una sesión se supera con el 80 % y sin agotar vidas', () => {
+  assert.strictEqual(Course.percent(23, 25), 92);
+  assert.ok(Course.passed(20, 25));
+  assert.ok(!Course.passed(19, 25));
+  assert.ok(!Course.passed(14, 15, true));
 });

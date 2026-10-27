@@ -10,8 +10,8 @@
   // ------------------------------------------------------------ Estado
 
   const DEFAULTS = {
-    v: 2, wpm: 18, eff: 10, freq: 700, volume: 0.85, wave: 'clear', sendWpm: 8,
-    send: true, vibrate: false, unlockAll: false, theme: 'midnight',
+    v: 3, wpm: 18, eff: 10, freq: 700, volume: 0.85, wave: 'clear', sendWpm: 12,
+    vibrate: false, unlockAll: false, theme: 'midnight', modeFilter: 'both',
     // Salidas activas al reproducir: sonido, vibración, destello de pantalla y linterna.
     out: { sound: true, vibrate: false, flash: false, torch: false }
   };
@@ -29,7 +29,12 @@
       if (saved.freq === 650) settings.freq = DEFAULTS.freq;
       settings.volume = Math.max(settings.volume, DEFAULTS.volume);
     }
-    return { settings, progress: raw.progress || {} };
+    // La versión 3 parte de un envío más rápido; el temporizador se adapta después.
+    if (raw.settings && (saved.v || 1) < 3) {
+      settings.v = DEFAULTS.v;
+      if (saved.sendWpm === 8 || saved.sendWpm === undefined) settings.sendWpm = DEFAULTS.sendWpm;
+    }
+    return { settings, progress: raw.progress || {}, streak: raw.streak || null };
   }
 
   const store = load();
@@ -39,7 +44,7 @@
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* sin almacenamiento */ }
   }
 
-  const state = { route: 'course', run: null, practiceTab: 'receive', cleanup: [] };
+  const state = { route: 'course', run: null, practiceTab: 'receive', cleanup: [], sel: undefined };
 
   // ------------------------------------------------------------ Utilidades DOM
 
@@ -100,11 +105,40 @@
     return player.play(morse, playOpts(extra));
   }
 
+  // Iconos de trazo (24×24), dibujados para esta app.
+  const ICONS = {
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+    eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/>',
+    gear: '<circle cx="12" cy="12" r="8.2" stroke-width="3.6" stroke-dasharray="3.2 3.24" stroke-linecap="butt"/><circle cx="12" cy="12" r="5.6" stroke-width="3.4"/>',
+    vibrate: '<rect x="8" y="4" width="8" height="16" rx="1.5"/><path d="M4.5 8v8M2 10v4M19.5 8v8M22 10v4"/>',
+    screen: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/>',
+    sound: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>',
+    torch: '<path d="M7 3h10l-2 6v12h-6V9z"/><path d="M12 13v2"/>',
+    down: '<path d="M6 9l6 6 6-6"/>',
+    up: '<path d="M6 15l6-6 6 6"/>',
+    flame: '<path d="M12 2.5c1 3.5 5.5 6 5.5 11a5.5 5.5 0 01-11 0c0-2.6 1.4-4.2 2.6-5.5.2 1.8.9 2.9 2 3.4C11 9 10.8 5.5 12 2.5z" fill="currentColor"/>',
+    menu: '<path d="M7 8h10M7 12h10M7 16h10"/>',
+    dish: '<path d="M4.5 7.5a10 10 0 0012 12z" fill="currentColor"/><path d="M10.5 13.5l5-5"/><circle cx="16.5" cy="7.5" r="1.6" fill="currentColor"/><path d="M8 19.5l-2.5 2h7"/>',
+    tower: '<path d="M12 8.5L7.5 21.5M12 8.5l4.5 13M9.2 16.5h5.6M8.3 19.2h7.4"/><circle cx="12" cy="7" r="1.7" fill="currentColor"/><path d="M8.6 4a5 5 0 000 6M15.4 4a5 5 0 010 6M5.8 2.5a8.5 8.5 0 000 9M18.2 2.5a8.5 8.5 0 010 9"/>',
+    crown: '<path d="M3.5 8l4.5 4.5L12 5.5l4 7L20.5 8 19 17.5H5z" fill="currentColor"/><path d="M5 21h14"/>',
+    book: '<path d="M2.5 5.5c3-1.2 6.2-1 9.5 1v13c-3.3-1.8-6.5-2-9.5-1z" fill="currentColor"/><path d="M21.5 5.5c-3-1.2-6.2-1-9.5 1v13c3.3-1.8 6.5-2 9.5-1z"/><path d="M14.5 9.5h4.5M14.5 12.5h4.5M14.5 15.5h4.5"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+    heart: '<path d="M12 20.5S3 15 3 8.8A4.6 4.6 0 0112 7a4.6 4.6 0 019 1.8C21 15 12 20.5 12 20.5z" fill="currentColor"/>'
+  };
+
+  function icon(name, cls) {
+    const el = h('span', { class: 'ico ' + (cls || ''), 'aria-hidden': 'true' });
+    el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+    return el;
+  }
+
   const OUTPUTS = [
-    ['sound', '🔊', 'Sonido'],
-    ['vibrate', '📳', 'Vibración'],
-    ['flash', '⚡', 'Destello de pantalla'],
-    ['torch', '🔦', 'Linterna']
+    ['vibrate', 'vibrate', 'Vibración'],
+    ['flash', 'screen', 'Destello de pantalla'],
+    ['sound', 'sound', 'Sonido'],
+    ['torch', 'torch', 'Linterna']
   ];
 
   function setOutput(key, on, btn) {
@@ -132,13 +166,16 @@
     btn.setAttribute('aria-pressed', String(on));
   }
 
-  // Barra para activar o desactivar las salidas durante la sesión.
+  function outputButtons() {
+    return OUTPUTS.map(([key, ico, label]) => h('button', {
+      class: 'tool', title: label, 'aria-label': label, 'aria-pressed': String(!!S.out[key]),
+      onclick: (e) => setOutput(key, !S.out[key], e.currentTarget)
+    }, icon(ico)));
+  }
+
+  // Barra para activar o desactivar las salidas fuera de las lecciones.
   function outputsBar() {
-    return h('div', { class: 'outputs', role: 'group', 'aria-label': 'Salidas' },
-      OUTPUTS.map(([key, icon, label]) => h('button', {
-        class: 'out-btn', title: label, 'aria-label': label, 'aria-pressed': String(!!S.out[key]),
-        onclick: (e) => setOutput(key, !S.out[key], e.currentTarget)
-      }, icon)));
+    return h('div', { class: 'outputs', role: 'group', 'aria-label': 'Salidas' }, outputButtons());
   }
 
   function onCleanup(fn) {
@@ -147,27 +184,69 @@
 
   // ------------------------------------------------------------ Progreso
 
-  function starsOf(lesson) {
-    return store.progress[lesson.id] || 0;
+  const MODE_NAME = { receive: 'RECEPCIÓN', send: 'ENVÍO' };
+  const MODE_LABEL = { receive: 'Recepción', send: 'Envío' };
+  const MODE_ICON = { receive: 'dish', send: 'tower' };
+  const FILTERS = [['both', 'Recepción y envío'], ['receive', 'Solo recepción'], ['send', 'Solo envío']];
+
+  function visibleModes() {
+    return S.modeFilter === 'receive' || S.modeFilter === 'send' ? [S.modeFilter] : Course.MODES;
   }
 
-  function unlocked(lesson) {
+  // Mejor porcentaje obtenido en una sesión (undefined si nunca se hizo).
+  function best(lesson, mode) {
+    return store.progress[`${lesson.id}:${mode}`];
+  }
+
+  function done(lesson, mode) {
+    return best(lesson, mode) >= Course.PASS;
+  }
+
+  function passed(lesson) {
+    return Course.MODES.some((m) => done(lesson, m));
+  }
+
+  // Recepción y envío avanzan por separado: cada sesión se abre al superar
+  // la anterior en ese mismo modo.
+  function unlocked(lesson, mode) {
     if (S.unlockAll || lesson.index === 0) return true;
-    return starsOf(COURSE.lessons[lesson.index - 1]) > 0 || starsOf(lesson) > 0;
-  }
-
-  function doneCount() {
-    return COURSE.lessons.filter((l) => starsOf(l) > 0).length;
+    return done(COURSE.lessons[lesson.index - 1], mode) || done(lesson, mode);
   }
 
   function learnedItems() {
     const seen = new Set();
     const out = [];
     for (const l of COURSE.lessons) {
-      if (!starsOf(l) || l.type !== 'learn') continue;
+      if (!passed(l) || l.type !== 'learn') continue;
       for (const it of l.newItems) if (!seen.has(it)) { seen.add(it); out.push(it); }
     }
     return out;
+  }
+
+  // Racha de días seguidos completando al menos una sesión.
+  function dayKey(d) {
+    d = d || new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+  }
+
+  function dayStreak() {
+    const st = store.streak;
+    if (!st || !st.last) return 0;
+    return daysBetween(st.last, dayKey()) <= 1 ? st.count : 0;
+  }
+
+  function bumpStreak() {
+    const t = dayKey();
+    const st = store.streak || { count: 0 };
+    if (st.last === t) return;
+    st.count = st.last && daysBetween(st.last, t) === 1 ? st.count + 1 : 1;
+    st.last = t;
+    store.streak = st;
+    save();
   }
 
   // ------------------------------------------------------------ Navegación
@@ -193,15 +272,17 @@
     state.cleanup = [];
     view.replaceChildren();
     // La cámara solo se mantiene abierta en las pantallas que reproducen.
-    if (!['lesson', 'practice', 'translator'].includes(state.route) && torch.ready) {
+    if (!['lesson', 'practice', 'utils'].includes(state.route) && torch.ready) {
       torch.release();
       S.out.torch = false;
     }
-    document.body.classList.toggle('in-lesson', state.route === 'lesson');
-    for (const b of nav.querySelectorAll('button')) b.classList.toggle('active', b.dataset.route === state.route);
+    const full = state.route === 'lesson' || state.route === 'sections';
+    document.body.classList.toggle('in-lesson', full);
+    const tab = state.route === 'sections' ? 'course' : state.route;
+    for (const b of nav.querySelectorAll('button')) b.classList.toggle('active', b.dataset.route === tab);
     const r = {
-      course: renderCourse, lesson: renderLesson, practice: renderPractice,
-      translator: renderTranslator, table: renderTable, settings: renderSettings
+      course: renderCourse, sections: renderSections, lesson: renderLesson, practice: renderPractice,
+      utils: renderUtils, settings: renderSettings
     }[state.route];
     r();
     if (state.route !== 'course') window.scrollTo(0, 0);
@@ -212,285 +293,498 @@
     if (b) go(b.dataset.route);
   });
 
-  // ------------------------------------------------------------ Curso
+  // ------------------------------------------------------------ Lecciones
 
-  const TYPE_ICON = { learn: '📖', review: '🔁', challenge: '🏆' };
-
-  function starsEl(n) {
-    return h('span', { class: 'stars', 'aria-label': `${n} estrellas` },
-      [1, 2, 3].map((i) => h('span', { class: i <= n ? 'on' : '' }, '★')));
+  function currentSub() {
+    const all = COURSE.sections.flatMap((s) => s.subs);
+    if (state.subId) return all.find((s) => s.id === state.subId);
+    const first = COURSE.lessons.find((l) => visibleModes().some((m) => !done(l, m)));
+    return first ? first.sub : all[all.length - 1];
   }
 
-  // Contenido del círculo: los caracteres nuevos si son cortos, si no un icono.
-  function nodeFace(lesson) {
-    if (lesson.type === 'learn') {
-      const txt = lesson.newItems.map((i) => i.text.replace(/[<>]/g, '')).join(' ');
-      if (txt.length <= 5) return h('span', { class: 'node-chars' }, txt);
-    }
-    return TYPE_ICON[lesson.type];
+  // Icono de estado de un modo en la tarjeta: hecho, siguiente, pendiente o bloqueado.
+  function statusIcon(lesson, mode, next) {
+    if (done(lesson, mode)) return icon(MODE_ICON[mode], 'st done');
+    if (!unlocked(lesson, mode)) return icon('lock', 'st locked');
+    if (next === lesson) return h('span', { class: 'st dot' });
+    return icon(MODE_ICON[mode], 'st open');
   }
 
-  // Desplazamiento horizontal en zigzag, como un camino.
-  const PATH = [0, 1, 1.6, 1, 0, -1, -1.6, -1];
+  function lessonCard(lesson, nextOf) {
+    const selected = state.sel === lesson.id;
+    const modes = visibleModes();
+    const sub = lesson.type === 'learn'
+      ? h('div', { class: 'lc-chars' }, lesson.subtitle)
+      : icon(lesson.type === 'review' ? 'book' : 'crown', 'lc-ico ' + lesson.type);
+    return h('div', {
+      class: 'lcard' + (selected ? ' selected' : ''), id: `l-${lesson.id}`,
+      onclick: (e) => {
+        if (e.target.closest('.lc-modes')) return;
+        state.sel = selected ? null : lesson.id;
+        renderCourseKeep();
+      }
+    },
+      h('div', { class: 'lc-top' },
+        h('span', { class: 'lc-left' }, modes.includes('receive') && statusIcon(lesson, 'receive', nextOf.receive)),
+        h('div', { class: 'lc-mid' }, h('div', { class: 'lc-title' }, lesson.title), sub),
+        h('span', { class: 'lc-right' }, modes.includes('send') && statusIcon(lesson, 'send', nextOf.send))),
+      selected && h('div', { class: 'lc-modes' }, modes.map((m) => {
+        const open = unlocked(lesson, m);
+        return h('button', {
+          class: 'lc-mode' + (open ? '' : ' locked'), disabled: !open,
+          onclick: () => startLesson(lesson, m)
+        }, icon(MODE_ICON[m]), MODE_LABEL[m]);
+      })));
+  }
 
-  function pathNode(lesson, pos, next) {
-    const open = unlocked(lesson);
-    const st = starsOf(lesson);
-    const current = lesson === next;
-    const cls = ['node', lesson.type, open ? 'open' : 'locked', st ? 'done' : '', current ? 'current' : ''].join(' ');
-    return h('div', { class: 'node-wrap', style: `--x:${PATH[pos % PATH.length]}` },
-      current && h('div', { class: 'bubble' }, starsOf(COURSE.lessons[0]) ? 'CONTINUAR' : 'EMPEZAR'),
-      h('button', {
-        class: cls, disabled: !open, 'aria-label': lesson.title,
-        onclick: () => startLesson(lesson)
-      }, open ? nodeFace(lesson) : '🔒'),
-      st > 0 && starsEl(st),
-      h('div', { class: 'node-title' }, lesson.title));
+  // Volver a dibujar la lista sin perder la posición de desplazamiento.
+  function renderCourseKeep() {
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
   }
 
   function renderCourse() {
-    const total = COURSE.lessons.length;
-    const done = doneCount();
-    const starTotal = COURSE.lessons.reduce((a, l) => a + starsOf(l), 0);
-    const next = COURSE.lessons.find((l) => !starsOf(l) && unlocked(l));
+    const sub = currentSub();
+    const ls = sub.lessons;
+    const count = (m) => ls.filter((l) => done(l, m)).length;
+    const ch = ls.filter((l) => l.type === 'challenge');
+    const nextOf = {};
+    for (const m of Course.MODES) nextOf[m] = COURSE.lessons.find((l) => !done(l, m) && unlocked(l, m));
+    if (state.sel === undefined) {
+      const n = nextOf[visibleModes()[0]];
+      state.sel = n && n.sub === sub ? n.id : null;
+    }
+    const streak = dayStreak();
     view.append(
-      h('section', { class: 'stats' },
-        h('div', {}, h('strong', {}, done), h('span', {}, 'lecciones')),
-        h('div', {}, h('strong', {}, `★ ${starTotal}`), h('span', {}, 'estrellas')),
-        h('div', {}, h('strong', {}, `${Math.round((done / total) * 100)} %`), h('span', {}, 'del curso'))));
-    COURSE.sections.forEach((sec, si) => {
-      const ls = sec.subs.flatMap((s) => s.lessons).concat(sec.challenge);
-      const d = ls.filter((l) => starsOf(l) > 0).length;
-      let pos = 0;
-      view.append(
-        h('section', { class: `unit unit-${si % 6}`, id: `sec-${sec.id}` },
-          h('header', { class: 'unit-banner' },
-            h('div', {},
-              h('small', {}, `SECCIÓN ${si + 1} · ${d}/${ls.length}`),
-              h('h2', {}, sec.title),
-              h('p', {}, sec.desc)),
-            h('span', { class: 'unit-icon' }, sec.icon),
-            h('div', { class: 'bar' }, h('div', { style: `width:${(d / ls.length) * 100}%` }))),
-          sec.subs.map((sub) => [
-            h('div', { class: 'divider' }, h('span', {}, sub.title)),
-            h('div', { class: 'path' }, sub.lessons.map((l) => pathNode(l, pos++, next)))
-          ]),
-          h('div', { class: 'path' }, pathNode(sec.challenge, 0, next))));
-    });
-    // Llevar a la vista la lección en curso.
-    const cur = view.querySelector('.node.current');
-    if (cur && done) requestAnimationFrame(() => cur.scrollIntoView({ block: 'center' }));
+      h('header', { class: 'home-head' },
+        h('button', { class: 'circle-btn', 'aria-label': 'Todas las secciones', onclick: () => go('sections') }, icon('menu')),
+        h('div', { class: 'home-titles' },
+          h('div', { class: 'home-sec' }, `Sección ${sub.section.num}`),
+          h('h1', {}, sub.title)),
+        h('button', { class: 'circle-btn', 'aria-label': 'Ayuda', onclick: helpSheet }, h('span', { class: 'q' }, '?'))),
+      h('div', { class: 'home-stats' },
+        h('span', {}, icon('dish', 'y'), `${count('receive')}/${ls.length}`),
+        h('span', {}, icon('crown', 'y'), `${ch.filter(passed).length}/${ch.length}`),
+        h('span', {}, icon('tower', 'y'), `${count('send')}/${ls.length}`)),
+      h('div', { class: 'home-streak' }, icon('flame', 'fl'),
+        streak ? `Racha de ${streak} ${streak === 1 ? 'día' : 'días'}` : 'Empieza hoy tu racha'),
+      h('div', { class: 'lcards' }, ls.map((l) => lessonCard(l, nextOf))));
+    const subs = COURSE.sections.flatMap((s) => s.subs);
+    const nextSub = subs[subs.indexOf(sub) + 1];
+    if (nextSub) {
+      view.append(h('button', {
+        class: 'btn ghost next-sub', onclick: () => { state.subId = nextSub.id; state.sel = undefined; render(); }
+      }, `Siguiente: ${nextSub.title} →`));
+    }
+    const sel = state.sel && document.getElementById(`l-${state.sel}`);
+    if (sel && !state.scrolled) {
+      state.scrolled = true;
+      requestAnimationFrame(() => sel.scrollIntoView({ block: 'center' }));
+    }
   }
 
-  // ------------------------------------------------------------ Lección
+  function helpSheet() {
+    const close = () => sheet.remove();
+    const sheet = h('div', { class: 'sheet-back', onclick: (e) => { if (e.target === sheet) close(); } },
+      h('div', { class: 'sheet' },
+        h('h2', {}, 'Cómo funciona'),
+        h('p', {}, h('strong', {}, 'Lecciones'), ': aprendes caracteres nuevos de dos en dos.'),
+        h('p', {}, h('strong', {}, 'Repasos'), ': practicas todo lo aprendido en la subsección.'),
+        h('p', {}, h('strong', {}, 'Desafíos'), `: ${Course.TOTAL.challenge} preguntas y ${Course.LIVES} vidas.`),
+        h('p', {}, 'Cada sesión se hace en ', h('strong', {}, 'recepción'), ' (escuchar e identificar) y en ',
+          h('strong', {}, 'envío'), ' (transmitir con la tecla). Los dos modos avanzan por separado y se superan con un ',
+          `${Course.PASS} % de aciertos.`),
+        h('button', { class: 'btn primary', onclick: close }, 'Entendido')));
+    document.body.append(sheet);
+    onCleanup(close);
+  }
 
-  function startLesson(lesson) {
+  function renderSections() {
+    const cur = currentSub();
+    const filterIdx = Math.max(0, FILTERS.findIndex(([v]) => v === (S.modeFilter || 'both')));
+    view.append(
+      h('header', { class: 'sec-head' },
+        h('button', { class: 'close-btn', 'aria-label': 'Cerrar', onclick: () => go('course') }, icon('close')),
+        h('h1', {}, 'Todas las secciones')),
+      h('div', { class: 'filter-wrap' },
+        h('button', {
+          class: 'filter', onclick: () => {
+            S.modeFilter = FILTERS[(filterIdx + 1) % FILTERS.length][0];
+            save();
+            render();
+          }
+        }, h('span', { class: 'muted' }, 'Modo: '), FILTERS[filterIdx][1])),
+      h('div', { class: 'sec-list' }, COURSE.sections.map((sec) => {
+        const open = state.openSec === sec.id || (!state.openSec && sec === cur.section);
+        return h('div', { class: 'sec-card' + (open ? ' open' : '') },
+          h('button', {
+            class: 'sec-main', onclick: () => { state.openSec = open ? '-' : sec.id; render(); }
+          },
+            sec === cur.section && h('span', { class: 'st dot' }),
+            h('div', { class: 'home-sec' }, `Sección ${sec.num}`),
+            h('div', { class: 'sec-title' }, sec.title)),
+          open && h('div', { class: 'sec-subs' }, sec.subs.map((s) => {
+            const n = s.lessons.filter(passed).length;
+            return h('button', {
+              class: 'sec-sub' + (s === cur ? ' cur' : ''),
+              onclick: () => { state.subId = s.id; state.sel = undefined; state.scrolled = false; go('course'); }
+            }, h('span', {}, s.title), h('span', { class: 'muted' }, `${n}/${s.lessons.length}`));
+          })));
+      })));
+  }
+
+  // ------------------------------------------------------------ Sesión
+
+  // Tiempo que se muestra la respuesta antes de pasar a la siguiente.
+  const REVEAL_MS = 3000;
+
+  // El cronómetro de envío recuerda la velocidad aprendida entre preguntas.
+  let sendTimer = null;
+
+  function startLesson(lesson, mode) {
     state.run = {
-      lesson,
-      exs: Course.makeExercises(lesson, { send: S.send }),
-      i: 0, correct: 0, scored: 0,
-      lives: lesson.type === 'challenge' ? 3 : null,
+      lesson, mode,
+      next: Course.questions(lesson),
+      intro: lesson.type === 'learn' && mode === 'receive' && !done(lesson, mode) ? lesson.newItems.slice() : [],
+      correct: 0, answered: 0, streak: 0,
+      lives: lesson.lives,
       finished: false
     };
+    state.sel = lesson.id;
+    state.subId = lesson.sub.id;
+    if (!sendTimer || sendTimer.base !== 1200 / S.sendWpm) sendTimer = new Morse.AdaptiveTimer(1200 / S.sendWpm);
     go('lesson');
+  }
+
+  function lessonHeader(run, hearts) {
+    const L = run.lesson;
+    return h('header', { class: 'lesson-head' },
+      h('button', { class: 'close-btn', 'aria-label': 'Salir', onclick: () => go('course') }, icon('close')),
+      h('div', { class: 'lesson-titles' },
+        h('div', { class: 'lesson-sub' }, `${L.subTitle} | ${L.title}`),
+        h('div', { class: 'lesson-mode' }, MODE_NAME[run.mode])),
+      hearts || h('span', { class: 'head-spacer' }));
   }
 
   function renderLesson() {
     const run = state.run;
     if (!run) return go('course');
-    const done = run.finished || run.i >= run.exs.length || run.lives === 0;
-    view.append(
-      h('div', { class: 'lesson-top' },
-        h('button', { class: 'icon-btn', 'aria-label': 'Salir', onclick: () => go('course') }, '✕'),
-        h('div', { class: 'bar' }, h('div', { style: `width:${(Math.min(run.i, run.exs.length) / run.exs.length) * 100}%` })),
-        run.lives !== null && h('span', { class: 'lives' }, '❤'.repeat(run.lives) + '♡'.repeat(3 - run.lives))),
-      !done && outputsBar()
-    );
-    if (done) return renderResult(run);
-    const ex = run.exs[run.i];
-    const body = h('div', { class: 'exercise' });
-    view.append(body);
-    ({
-      intro: exIntro, 'listen-choose': exListenChoose, 'read-choose': exReadChoose,
-      'listen-type': exListenType, send: exSend
-    })[ex.type](ex, body);
-  }
+    if (run.finished) return renderResult(run);
+    const L = run.lesson;
 
-  function nextExercise() {
-    state.run.i++;
-    render();
-  }
-
-  // Registra la respuesta y muestra el panel de corrección.
-  function answer(ex, body, ok, detail) {
-    const run = state.run;
-    if (body.dataset.answered) return;
-    body.dataset.answered = '1';
-    run.scored++;
-    if (ok) run.correct++;
-    else if (run.lives !== null) run.lives--;
-    body.querySelectorAll('button.opt, input, .key').forEach((b) => { b.disabled = true; });
-    const panel = h('div', { class: `feedback ${ok ? 'ok' : 'bad'}` },
-      h('strong', { class: 'fb-title' }, ok ? '✔ ¡Correcto!' : '✘ Incorrecto'),
-      detail,
-      !ok && h('div', { class: 'solution' },
-        h('span', { class: 'big-label small' }, ex.item.text), patternEl(ex.item.morse)),
-      ex.item.meaning && h('p', { class: 'muted' }, ex.item.meaning),
-      h('button', { class: 'btn primary', onclick: nextExercise }, 'Continuar'));
-    body.append(panel);
-    panel.querySelector('button').focus({ preventScroll: true });
-    if (!ok || ex.type === 'read-choose') playMorse(ex.item.morse);
-    if (S.vibrate && navigator.vibrate) navigator.vibrate(ok ? 30 : [60, 60, 60]);
-  }
-
-  function playButton(item, big) {
-    return h('button', {
-      class: 'play-btn' + (big ? ' big' : ''), 'aria-label': 'Reproducir',
-      onclick: () => playMorse(item.morse)
-    }, '▶');
-  }
-
-  function exIntro(ex, body) {
-    const it = ex.item;
-    body.append(
-      h('p', { class: 'prompt' }, 'Nuevo elemento'),
-      h('div', { class: 'big-label' }, it.text),
-      patternEl(it.morse, 'large'),
-      it.meaning && h('p', { class: 'meaning' }, it.meaning),
-      h('p', { class: 'muted' }, 'Escúchalo varias veces y fíjate en su ritmo.'),
-      playButton(it, true),
-      h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: nextExercise }, 'Entendido')));
-    playMorse(it.morse);
-  }
-
-  function optionButtons(ex, body, showPattern) {
-    return h('div', { class: 'options' + (ex.options.some((o) => o.text.length > 6) ? ' wide' : '') },
-      ex.options.map((o) => h('button', {
-        class: 'opt',
-        onclick: (e) => {
-          const ok = o === ex.item;
-          e.currentTarget.classList.add(ok ? 'right' : 'wrong');
-          body.querySelectorAll('button.opt').forEach((b, i) => {
-            if (ex.options[i] === ex.item) b.classList.add('right');
-          });
-          answer(ex, body, ok);
-        }
-      }, showPattern ? patternEl(o.morse) : o.text)));
-  }
-
-  function exListenChoose(ex, body) {
-    body.append(
-      h('p', { class: 'prompt' }, '¿Qué has oído?'),
-      playButton(ex.item, true),
-      optionButtons(ex, body, false));
-    playMorse(ex.item.morse);
-  }
-
-  function exReadChoose(ex, body) {
-    body.append(
-      h('p', { class: 'prompt' }, '¿Qué representa este código?'),
-      patternEl(ex.item.morse, 'large'),
-      optionButtons(ex, body, false));
-  }
-
-  function exListenType(ex, body) {
-    const single = ex.item.text.length === 1;
-    const input = h('input', {
-      class: 'answer-input', type: 'text', autocomplete: 'off', autocapitalize: 'characters',
-      spellcheck: 'false', placeholder: 'Escribe lo que oyes',
-      oninput: () => { if (single && input.value.trim()) check(); },
-      onkeydown: (e) => { if (e.key === 'Enter') check(); }
-    });
-    const check = () => {
-      if (!input.value.trim()) return;
-      const ok = Course.sameText(input.value, ex.item.text);
-      answer(ex, body, ok, !ok && h('p', {}, `Escribiste: ${input.value.toUpperCase()}`));
+    const hearts = run.lives !== null && h('div', { class: 'hearts' });
+    const drawHearts = () => {
+      if (!hearts) return;
+      hearts.replaceChildren(...Array.from({ length: Course.LIVES }, (_, i) => icon('heart', i < run.lives ? 'on' : '')));
     };
-    body.append(
-      h('p', { class: 'prompt' }, 'Escucha y escribe'),
-      playButton(ex.item, true),
-      input,
-      !single && h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: check }, 'Comprobar')));
-    playMorse(ex.item.morse);
-    setTimeout(() => input.focus(), 50);
+    drawHearts();
+    // Franja: aciertos/respondidas, barra de preguntas respondidas y racha.
+    const count = h('span', { class: 'count' });
+    const fill = h('div', {});
+    const streak = h('span', { class: 'streak' });
+    const drawStrip = () => {
+      count.textContent = `${run.correct}/${run.answered}`;
+      fill.style.width = `${Math.min(1, run.answered / L.total) * 100}%`;
+      streak.replaceChildren(icon('flame'), String(run.streak));
+      streak.classList.toggle('hot', run.streak > 0);
+    };
+    drawStrip();
+
+    const prompt = h('p', { class: 'card-prompt' });
+    const big = h('div', { class: 'card-big' });
+    const pat = h('div', { class: 'card-pattern' });
+    const eyeBtn = h('button', { class: 'round-btn', 'aria-label': 'Mostrar código' });
+    const playBtn = h('button', { class: 'round-btn active', 'aria-label': 'Reproducir' }, icon('play'));
+    const card = h('div', { class: 'qcard' }, prompt, big, pat, h('div', { class: 'card-actions' }, eyeBtn, playBtn));
+
+    const tools = h('div', { class: 'toolbar' },
+      h('button', { class: 'tool', 'aria-label': 'Ajustes rápidos', onclick: quickSettings }, icon('gear')),
+      outputButtons(),
+      h('button', {
+        class: 'tool', 'aria-label': 'Plegar barra', onclick: (e) => {
+          const c = tools.classList.toggle('collapsed');
+          e.currentTarget.replaceChildren(icon(c ? 'up' : 'down'));
+        }
+      }, icon('down')));
+
+    const answers = h('div', { class: 'answers' });
+
+    view.append(h('div', { class: 'lesson' },
+      lessonHeader(run, hearts),
+      h('div', { class: 'strip' }, count, h('div', { class: 'ybar' }, fill), streak),
+      h('div', { class: 'stage' }, card),
+      tools,
+      answers));
+
+    let q = null;
+    let busy = false;
+    const timers = [];
+    const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+    onCleanup(() => timers.forEach(clearTimeout));
+
+    const showPattern = (morse, cls) => pat.replaceChildren(patternEl(morse, cls || ''));
+    const setEye = (active, off) => {
+      eyeBtn.replaceChildren(icon(off ? 'eyeOff' : 'eye'));
+      eyeBtn.classList.toggle('active', active);
+      eyeBtn.disabled = !active;
+    };
+    const play = () => q && playMorse(q.item.morse);
+    playBtn.onclick = play;
+    const sizeBig = (text) => big.classList.toggle('long', text.length > 3);
+
+    // Presentación de los caracteres nuevos (solo la primera vez).
+    const intro = () => {
+      const it = run.intro.shift();
+      card.className = 'qcard';
+      prompt.textContent = 'Nuevo carácter';
+      big.textContent = it.text;
+      sizeBig(it.text);
+      showPattern(it.morse);
+      setEye(false);
+      q = { item: it };
+      answers.className = 'answers single';
+      answers.replaceChildren(h('button', { class: 'answer', onclick: () => (run.intro.length ? intro() : ask()) }, 'Continuar'));
+      later(play, 250);
+    };
+
+    const finish = () => {
+      run.finished = true;
+      render();
+    };
+
+    // Registra la respuesta, muestra la solución y pasa a la siguiente.
+    const resolve = (ok, sent) => {
+      busy = true;
+      run.answered++;
+      if (ok) {
+        run.correct++;
+        run.streak++;
+      } else {
+        run.streak = 0;
+        if (run.lives !== null) run.lives--;
+      }
+      drawStrip();
+      drawHearts();
+      big.textContent = q.item.text;
+      sizeBig(q.item.text);
+      big.classList.add('reveal');
+      if (run.mode === 'send') {
+        card.classList.add(ok ? 'ok' : 'bad');
+        if (!ok) pat.replaceChildren(sent ? patternEl(sent, 'bad') : '', patternEl(q.item.morse, 'ok'));
+      }
+      if (S.vibrate && navigator.vibrate) navigator.vibrate(ok ? 30 : [60, 60, 60]);
+      if (!ok) playMorse(q.item.morse);
+      const end = run.answered >= L.total || run.lives === 0;
+      later(end ? finish : ask, REVEAL_MS);
+    };
+
+    const ask = () => {
+      busy = false;
+      q = run.next();
+      card.className = 'qcard';
+      big.classList.remove('reveal');
+      pat.replaceChildren();
+      if (run.mode === 'receive') askReceive();
+      else askSend();
+    };
+
+    const markChoice = (btn, ok, right) => {
+      btn.classList.add(ok ? 'right' : 'wrong');
+      if (!ok && right) right.classList.add('right');
+    };
+
+    const askReceive = () => {
+      const word = q.item.text.length > 1 && !q.item.text.startsWith('<');
+      prompt.textContent = word ? 'Identifica la palabra' : 'Identifica el carácter';
+      big.textContent = '?';
+      big.classList.remove('long');
+      setEye(true);
+      eyeBtn.onclick = () => { showPattern(q.item.morse, 'muted-pattern'); setEye(false); };
+      if (L.kb) {
+        // Teclado completo: solo están activas las teclas ya aprendidas.
+        const learned = new Set(L.items.map((i) => i.text));
+        const keys = {};
+        answers.className = 'answers kb';
+        answers.replaceChildren(...L.kb.map((row) => h('div', { class: 'kb-row' }, [...row].map((c) => {
+          const on = learned.has(c);
+          keys[c] = h('button', {
+            class: 'key', disabled: !on,
+            onclick: (e) => {
+              if (busy) return;
+              const ok = c === q.item.text;
+              markChoice(e.currentTarget, ok, keys[q.item.text]);
+              resolve(ok);
+            }
+          }, c);
+          return keys[c];
+        }))));
+      } else {
+        const long = q.options.some((o) => o.text.length > 4);
+        const btns = q.options.map((o) => h('button', {
+          class: 'answer',
+          onclick: (e) => {
+            if (busy) return;
+            const ok = o === q.item;
+            markChoice(e.currentTarget, ok, btns[q.options.indexOf(q.item)]);
+            resolve(ok);
+          }
+        }, o.text));
+        answers.className = `answers n${q.options.length}${long ? ' long' : ''}`;
+        answers.replaceChildren(...btns);
+      }
+      later(play, 300);
+    };
+
+    const askSend = () => {
+      prompt.textContent = 'Enviar señal';
+      big.textContent = q.item.text;
+      sizeBig(q.item.text);
+      const judge = new Morse.SendJudge(q.item.morse);
+      let hinted = false;
+      let idle = null;
+      const sentEl = h('div', { class: 'sent' });
+      const draw = (st) => {
+        const m = judge.morse();
+        if (!hinted || st) pat.replaceChildren(m ? patternEl(m, st || 'live') : '');
+        else pat.replaceChildren(patternEl(q.item.morse, 'muted-pattern'), sentEl);
+        if (hinted && !st) sentEl.replaceChildren(m ? patternEl(m, 'live') : '');
+      };
+      setEye(true, true);
+      eyeBtn.onclick = () => { hinted = true; setEye(false); draw(); };
+      const pad = h('button', { class: 'pad', 'aria-label': 'Manipulador' }, 'Toca y mantén para enviar');
+      answers.className = 'answers single';
+      answers.replaceChildren(pad);
+      bindKey(pad, {
+        enabled: () => !busy,
+        down: () => clearTimeout(idle),
+        up: (ms) => {
+          const st = judge.feed(sendTimer.classify(ms));
+          if (st === 'progress') {
+            draw();
+            // Si se deja a medias, cuenta como fallo.
+            idle = setTimeout(() => { if (!busy) resolve(false, judge.morse()); }, Math.max(1500, 7 * sendTimer.dot));
+            timers.push(idle);
+          } else if (st === 'ok') {
+            draw('ok');
+            resolve(true);
+          } else {
+            resolve(false, judge.morse());
+          }
+        }
+      });
+    };
+
+    if (run.intro.length) intro();
+    else ask();
   }
 
-  function exSend(ex, body) {
-    const target = ex.item.morse.split(/\s+/).filter((p) => p !== '/').join(' ');
-    const hint = h('div', { class: 'hint hidden' }, patternEl(ex.item.morse, 'large'));
-    const key = makeKey({
-      onIdle: (morse) => {
-        const sent = morse.split(/\s+/).filter((p) => p !== '/').join(' ');
-        if (!sent) return;
-        const ok = sent === target;
-        answer(ex, body, ok, !ok && h('div', { class: 'solution' },
-          h('span', { class: 'muted' }, 'Enviaste: '), patternEl(morse), ` (${Morse.decode(morse)})`));
-      }
-    });
-    body.append(
-      h('p', { class: 'prompt' }, 'Transmite con el manipulador'),
-      h('div', { class: 'big-label' }, ex.item.text),
-      h('button', { class: 'btn ghost small', onclick: () => hint.classList.toggle('hidden') }, 'Ver pista'),
-      hint,
-      key.el);
+  // Ajustes rápidos dentro de la sesión.
+  function quickSettings() {
+    const slider = (key, label, min, max, step, fmt) => {
+      const out = h('span', { class: 'val' }, fmt(S[key]));
+      return h('label', { class: 'field' }, h('span', { class: 'row between' }, label, out),
+        h('input', {
+          type: 'range', min, max, step, value: S[key],
+          oninput: (e) => {
+            S[key] = +e.target.value;
+            if (key === 'wpm' && S.eff > S.wpm) S.eff = S.wpm;
+            if (key === 'eff' && S.eff > S.wpm) S.wpm = S.eff;
+            out.textContent = fmt(S[key]);
+            save();
+          }
+        }));
+    };
+    const close = () => sheet.remove();
+    const sheet = h('div', { class: 'sheet-back', onclick: (e) => { if (e.target === sheet) close(); } },
+      h('div', { class: 'sheet' },
+        h('h2', {}, 'Ajustes'),
+        slider('wpm', 'Velocidad de caracteres', 5, 60, 1, (v) => `${v} ppm`),
+        slider('eff', 'Velocidad efectiva', 3, 60, 1, (v) => `${v} ppm`),
+        slider('freq', 'Tono', 300, 1200, 10, (v) => `${v} Hz`),
+        slider('volume', 'Volumen', 0.05, 1, 0.05, (v) => `${Math.round(v * 100)} %`),
+        h('button', { class: 'btn primary', onclick: close }, 'Listo')));
+    document.body.append(sheet);
+    onCleanup(close);
+  }
+
+  function resultMessage(pct, outOfLives) {
+    if (outOfLives) return 'Te has quedado sin vidas. Repasa y vuelve a intentarlo.';
+    if (pct === 100) return '¡Perfecto! Lo tienes dominado.';
+    if (pct >= 90) return 'Buen trabajo. Repetirla te ayudará a afianzarlo.';
+    if (pct >= Course.PASS) return 'Superada. Un poco más de práctica y saldrá solo.';
+    return `Necesitas un ${Course.PASS} % para superarla. ¡Inténtalo otra vez!`;
+  }
+
+  // Anillo de progreso con el porcentaje de aciertos.
+  function ring(pct) {
+    const r = 54;
+    const c = 2 * Math.PI * r;
+    const el = h('div', { class: 'ring' });
+    el.innerHTML = `<svg viewBox="0 0 128 128"><circle cx="64" cy="64" r="${r}" class="ring-track"/>` +
+      `<circle cx="64" cy="64" r="${r}" class="ring-fill" stroke-dasharray="${(c * pct) / 100} ${c}" transform="rotate(-90 64 64)"/></svg>`;
+    return el;
   }
 
   function renderResult(run) {
-    const failed = run.lives === 0;
-    const st = failed ? 0 : Course.stars(run.correct, run.scored);
-    const pct = run.scored ? Math.round((run.correct / run.scored) * 100) : 0;
-    if (!run.finished) {
-      run.finished = true;
-      if (st > starsOf(run.lesson)) {
-        store.progress[run.lesson.id] = st;
-        save();
-      }
+    const L = run.lesson;
+    const outOfLives = run.lives === 0;
+    const pct = Course.percent(run.correct, run.answered);
+    const ok = Course.passed(run.correct, run.answered, outOfLives);
+    if (!run.saved) {
+      run.saved = true;
+      const key = `${L.id}:${run.mode}`;
+      const score = outOfLives ? Math.min(pct, Course.PASS - 1) : pct;
+      if (!(store.progress[key] >= score)) store.progress[key] = score;
+      save();
+      bumpStreak();
     }
-    const next = COURSE.lessons[run.lesson.index + 1];
-    view.append(
-      h('div', { class: 'exercise result' },
-        h('div', { class: 'result-icon' }, st ? '🎉' : '💪'),
-        h('h2', {}, st ? '¡Lección superada!' : failed ? 'Te has quedado sin vidas' : 'Casi lo tienes'),
-        starsEl(st),
-        h('p', {}, `${run.correct} de ${run.scored} aciertos (${pct} %)`),
-        !st && h('p', { class: 'muted' }, 'Necesitas un 80 % de aciertos para superar la lección.'),
-        st > 0 && next && unlocked(next) && h('button', { class: 'btn primary', onclick: () => startLesson(next) }, 'Siguiente lección'),
-        h('button', { class: 'btn' + (st ? '' : ' primary'), onclick: () => startLesson(run.lesson) }, 'Repetir'),
-        h('button', { class: 'btn ghost', onclick: () => go('course') }, 'Volver al curso')));
+    const next = COURSE.lessons[L.index + 1];
+    view.append(h('div', { class: 'lesson result-screen' },
+      lessonHeader(run),
+      h('div', { class: 'result-body' },
+        h('h2', {}, outOfLives ? 'Desafío no superado' : 'Sesión completada'),
+        h('div', { class: 'ring-wrap' }, ring(pct),
+          h('div', { class: 'ring-text' },
+            h('strong', {}, `${pct}%`),
+            h('span', {}, `${run.correct} / ${run.answered} Correctas`))),
+        h('p', { class: 'result-msg' }, resultMessage(pct, outOfLives))),
+      h('div', { class: 'result-actions' },
+        h('button', { class: 'answer', onclick: () => startLesson(L, run.mode) }, 'Reintentar'),
+        h('button', {
+          class: 'answer primary', onclick: () => {
+            state.sel = ok && next ? next.id : L.id;
+            if (ok && next) state.subId = next.sub.id;
+            state.scrolled = false;
+            go('course');
+          }
+        }, 'Continuar'))));
   }
 
-  // ------------------------------------------------------------ Manipulador
-
-  function makeKey(opts) {
-    const live = h('div', { class: 'key-live' });
-    const text = h('div', { class: 'key-text' });
-    const keyer = new Morse.Keyer({
-      unitMs: 1200 / S.sendWpm,
-      onChange: (st) => {
-        live.replaceChildren(st.morse ? patternEl(st.morse) : h('span', { class: 'muted' }, 'Pulsa la tecla'));
-        text.textContent = st.text;
-        if (opts.onChange) opts.onChange(st);
-      },
-      onIdle: opts.onIdle
-    });
-    const pad = h('button', { class: 'key', 'aria-label': 'Manipulador' }, h('span', {}, 'TECLA'));
+  // Conecta un botón como manipulador: tono y salidas mientras está pulsado,
+  // y avisa con la duración de cada pulsación. También con la barra espaciadora.
+  function bindKey(pad, opts) {
+    let downAt = null;
     const down = (e) => {
       if (e) e.preventDefault();
-      if (pad.disabled) return;
+      if (downAt !== null || (opts.enabled && !opts.enabled())) return;
+      downAt = performance.now();
       pad.classList.add('down');
       if (S.out.sound) player.toneOn(S.freq, S.volume, S.wave);
       if (S.out.vibrate && navigator.vibrate) navigator.vibrate(10000);
       light(true);
-      keyer.down(performance.now());
+      if (opts.down) opts.down();
     };
     const up = (e) => {
       if (e) e.preventDefault();
-      if (!pad.classList.contains('down')) return;
+      if (downAt === null) return;
+      const ms = performance.now() - downAt;
+      downAt = null;
       pad.classList.remove('down');
       player.toneOff();
       if (S.out.vibrate && navigator.vibrate) navigator.vibrate(0);
       light(false);
-      keyer.up(performance.now());
+      opts.up(ms);
     };
     pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); down(e); });
     pad.addEventListener('pointerup', up);
@@ -507,13 +801,35 @@
       document.removeEventListener('keydown', kd);
       document.removeEventListener('keyup', ku);
       player.toneOff();
-      keyer.reset();
+      light(false);
     });
+  }
+
+  // ------------------------------------------------------------ Manipulador
+
+  function makeKey(opts) {
+    const live = h('div', { class: 'key-live' });
+    const text = h('div', { class: 'key-text' });
+    const keyer = new Morse.Keyer({
+      unitMs: 1200 / S.sendWpm,
+      onChange: (st) => {
+        live.replaceChildren(st.morse ? patternEl(st.morse) : h('span', { class: 'muted' }, 'Pulsa la tecla'));
+        text.textContent = st.text;
+        if (opts.onChange) opts.onChange(st);
+      },
+      onIdle: opts.onIdle
+    });
+    const pad = h('button', { class: 'pad', 'aria-label': 'Manipulador' }, 'Toca y mantén para enviar');
+    bindKey(pad, {
+      down: () => keyer.down(performance.now()),
+      up: () => keyer.up(performance.now())
+    });
+    onCleanup(() => keyer.reset());
     const el = h('div', { class: 'keyer' },
       live, text, pad,
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost small', onclick: () => keyer.reset() }, 'Borrar'),
-        h('span', { class: 'muted small' }, `Envío a ${S.sendWpm} ppm · también con la barra espaciadora`)));
+        h('span', { class: 'muted small' }, 'Se adapta a tu velocidad · también con la barra espaciadora')));
     keyer.emit();
     return { el, keyer };
   }
@@ -694,7 +1010,6 @@
       }
     }, '▶ Reproducir');
     view.append(
-      h('h1', {}, 'Traductor'),
       h('section', { class: 'card' },
         input,
         output,
@@ -713,6 +1028,20 @@
     update();
   }
 
+  // ------------------------------------------------------------ Utilidades
+
+  function renderUtils() {
+    state.utilTab = state.utilTab || 'translator';
+    view.append(
+      h('h1', {}, 'Utilidades'),
+      h('div', { class: 'tabs' }, [['translator', 'Traductor'], ['table', 'Tabla']].map(([id, t]) =>
+        h('button', {
+          class: state.utilTab === id ? 'active' : '',
+          onclick: () => { state.utilTab = id; render(); }
+        }, t))));
+    (state.utilTab === 'translator' ? renderTranslator : renderTable)();
+  }
+
   // ------------------------------------------------------------ Tabla
 
   function renderTable() {
@@ -722,7 +1051,6 @@
       ['Puntuación', Object.keys(Morse.CHARS).filter((c) => !/[A-ZÑ0-9]/.test(c))],
       ['Prosignos', Object.keys(Morse.PROSIGNS).map((p) => `<${p}>`)]
     ];
-    view.append(h('h1', {}, 'Tabla de referencia'));
     for (const [title, chars] of groups) {
       view.append(h('section', { class: 'card' },
         h('h2', {}, title),
@@ -788,12 +1116,12 @@
       h('h1', {}, 'Ajustes'),
       h('section', { class: 'card' },
         h('h2', {}, 'Apariencia'),
-        choice('theme', 'Tema', [['midnight', 'Medianoche'], ['slate', 'Pizarra'], ['light', 'Claro']], applyTheme)),
+        choice('theme', 'Tema', [['midnight', 'Medianoche'], ['slate', 'Pizarra']], applyTheme)),
       h('section', { class: 'card' },
         h('h2', {}, 'Sonido'),
         choice('wave', 'Timbre', [['clear', 'Nítido (recomendado en móvil)'], ['sine', 'Suave (onda pura)']]),
-        slider('wpm', 'Velocidad de caracteres', 5, 40, 1, (v) => `${v} ppm`),
-        slider('eff', 'Velocidad efectiva (Farnsworth)', 3, 40, 1, (v) => `${v} ppm`),
+        slider('wpm', 'Velocidad de caracteres', 5, 60, 1, (v) => `${v} ppm`),
+        slider('eff', 'Velocidad efectiva (Farnsworth)', 3, 60, 1, (v) => `${v} ppm`),
         h('p', { class: 'muted small' }, 'Aprender con caracteres rápidos y más espacio entre ellos ayuda a reconocer el sonido de cada letra en vez de contar puntos y rayas.'),
         slider('freq', 'Tono', 300, 1200, 10, (v) => `${v} Hz`),
         slider('volume', 'Volumen', 0.05, 1, 0.05, (v) => `${Math.round(v * 100)} %`),
@@ -806,11 +1134,10 @@
         h('p', { class: 'muted small' }, '🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna (pide permiso de cámara; solo en Android)')),
       h('section', { class: 'card' },
         h('h2', {}, 'Envío'),
-        slider('sendWpm', 'Velocidad de envío', 4, 30, 1, (v) => `${v} ppm`),
-        h('p', { class: 'muted small' }, 'Determina cuánto debe durar una raya y cuánto silencio separa letras y palabras al usar el manipulador.')),
+        slider('sendWpm', 'Velocidad de envío inicial', 4, 40, 1, (v) => `${v} ppm`),
+        h('p', { class: 'muted small' }, 'Punto de partida para distinguir puntos de rayas. Después la app se adapta sola a tu forma de manipular.')),
       h('section', { class: 'card' },
         h('h2', {}, 'Curso'),
-        toggle('send', 'Ejercicios de envío', 'Incluir ejercicios con el manipulador en las lecciones.'),
         toggle('vibrate', 'Vibrar al responder', 'Una vibración corta al acertar y tres al fallar.'),
         toggle('unlockAll', 'Desbloquear todo', 'Acceder a cualquier lección sin completar las anteriores.'),
         h('button', {
