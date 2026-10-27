@@ -5,22 +5,31 @@
   const { Morse, Course } = window;
   const COURSE = Course.build();
   const player = new Morse.Player();
+  const torch = new Morse.Torch();
 
   // ------------------------------------------------------------ Estado
 
   const DEFAULTS = {
-    wpm: 18, eff: 10, freq: 650, volume: 0.6, sendWpm: 8,
-    send: true, vibrate: false, unlockAll: false
+    v: 2, wpm: 18, eff: 10, freq: 700, volume: 0.85, wave: 'clear', sendWpm: 8,
+    send: true, vibrate: false, unlockAll: false, theme: 'midnight',
+    // Salidas activas al reproducir: sonido, vibración, destello de pantalla y linterna.
+    out: { sound: true, vibrate: false, flash: false, torch: false }
   };
   const STORE_KEY = 'morse-completo.v1';
 
   function load() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(STORE_KEY)) || {};
-      return { settings: Object.assign({}, DEFAULTS, raw.settings), progress: raw.progress || {} };
-    } catch (e) {
-      return { settings: Object.assign({}, DEFAULTS), progress: {} };
+    let raw = {};
+    try { raw = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { /* sin almacenamiento */ }
+    const saved = raw.settings || {};
+    const settings = Object.assign({}, DEFAULTS, saved);
+    settings.out = Object.assign({}, DEFAULTS.out, saved.out, { torch: false });
+    // Los ajustes de la primera versión tenían un tono más bajo y suave.
+    if (raw.settings && !saved.v) {
+      settings.v = DEFAULTS.v;
+      if (saved.freq === 650) settings.freq = DEFAULTS.freq;
+      settings.volume = Math.max(settings.volume, DEFAULTS.volume);
     }
+    return { settings, progress: raw.progress || {} };
   }
 
   const store = load();
@@ -44,7 +53,7 @@
       else if (k === 'checked') el.checked = v;
       else el.setAttribute(k, v === true ? '' : v);
     }
-    for (const c of kids.flat()) {
+    for (const c of kids.flat(Infinity)) {
       if (c == null || c === false) continue;
       el.append(c.nodeType ? c : document.createTextNode(c));
     }
@@ -62,12 +71,74 @@
     return wrap;
   }
 
+  function toast(msg) {
+    const t = h('div', { class: 'toast', role: 'status' }, msg);
+    document.body.append(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  // ------------------------------------------------------------ Salidas
+
+  const flashEl = h('div', { class: 'flash-overlay', 'aria-hidden': 'true' });
+  document.body.append(flashEl);
+
+  // Enciende o apaga a la vez la pantalla y la linterna, según las salidas activas.
+  function light(on) {
+    flashEl.classList.toggle('on', on && S.out.flash);
+    if (S.out.torch) torch.set(on);
+  }
+
   function playOpts(extra) {
-    return Object.assign({ wpm: S.wpm, eff: S.eff, freq: S.freq, volume: S.volume }, extra);
+    return Object.assign({
+      wpm: S.wpm, eff: S.eff, freq: S.freq, volume: S.volume, wave: S.wave,
+      sound: S.out.sound, vibrate: S.out.vibrate,
+      onSegment: S.out.flash || S.out.torch ? light : null
+    }, extra);
   }
 
   function playMorse(morse, extra) {
     return player.play(morse, playOpts(extra));
+  }
+
+  const OUTPUTS = [
+    ['sound', '🔊', 'Sonido'],
+    ['vibrate', '📳', 'Vibración'],
+    ['flash', '⚡', 'Destello de pantalla'],
+    ['torch', '🔦', 'Linterna']
+  ];
+
+  function setOutput(key, on, btn) {
+    if (key === 'vibrate' && on && !navigator.vibrate) {
+      return toast('Este navegador no permite vibrar (en iPhone no está disponible).');
+    }
+    if (key === 'torch' && on) {
+      btn.classList.add('busy');
+      torch.enable().then(() => {
+        S.out.torch = true;
+        btn.classList.remove('busy');
+        btn.setAttribute('aria-pressed', 'true');
+        toast('Linterna activada');
+      }, (err) => {
+        btn.classList.remove('busy');
+        toast(err && err.name === 'NotAllowedError'
+          ? 'Permite el acceso a la cámara para usar la linterna.'
+          : 'Este dispositivo o navegador no permite controlar la linterna. Prueba con Chrome en Android.');
+      });
+      return;
+    }
+    if (key === 'torch' && !on) torch.release();
+    S.out[key] = on;
+    if (key !== 'torch') save();
+    btn.setAttribute('aria-pressed', String(on));
+  }
+
+  // Barra para activar o desactivar las salidas durante la sesión.
+  function outputsBar() {
+    return h('div', { class: 'outputs', role: 'group', 'aria-label': 'Salidas' },
+      OUTPUTS.map(([key, icon, label]) => h('button', {
+        class: 'out-btn', title: label, 'aria-label': label, 'aria-pressed': String(!!S.out[key]),
+        onclick: (e) => setOutput(key, !S.out[key], e.currentTarget)
+      }, icon)));
   }
 
   function onCleanup(fn) {
@@ -109,11 +180,23 @@
     render();
   }
 
+  function applyTheme() {
+    document.documentElement.dataset.theme = S.theme;
+    const meta = document.querySelector('meta[name=theme-color]');
+    if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  }
+
   function render() {
     player.stop();
+    light(false);
     state.cleanup.forEach((fn) => fn());
     state.cleanup = [];
     view.replaceChildren();
+    // La cámara solo se mantiene abierta en las pantallas que reproducen.
+    if (!['lesson', 'practice', 'translator'].includes(state.route) && torch.ready) {
+      torch.release();
+      S.out.torch = false;
+    }
     document.body.classList.toggle('in-lesson', state.route === 'lesson');
     for (const b of nav.querySelectorAll('button')) b.classList.toggle('active', b.dataset.route === state.route);
     const r = {
@@ -121,7 +204,7 @@
       translator: renderTranslator, table: renderTable, settings: renderSettings
     }[state.route];
     r();
-    window.scrollTo(0, 0);
+    if (state.route !== 'course') window.scrollTo(0, 0);
   }
 
   nav.addEventListener('click', (e) => {
@@ -138,46 +221,65 @@
       [1, 2, 3].map((i) => h('span', { class: i <= n ? 'on' : '' }, '★')));
   }
 
-  function lessonRow(lesson) {
+  // Contenido del círculo: los caracteres nuevos si son cortos, si no un icono.
+  function nodeFace(lesson) {
+    if (lesson.type === 'learn') {
+      const txt = lesson.newItems.map((i) => i.text.replace(/[<>]/g, '')).join(' ');
+      if (txt.length <= 5) return h('span', { class: 'node-chars' }, txt);
+    }
+    return TYPE_ICON[lesson.type];
+  }
+
+  // Desplazamiento horizontal en zigzag, como un camino.
+  const PATH = [0, 1, 1.6, 1, 0, -1, -1.6, -1];
+
+  function pathNode(lesson, pos, next) {
     const open = unlocked(lesson);
     const st = starsOf(lesson);
-    return h('button', {
-      class: `lesson-row ${lesson.type} ${open ? '' : 'locked'} ${st ? 'done' : ''}`,
-      disabled: !open,
-      onclick: () => startLesson(lesson)
-    },
-      h('span', { class: 'lesson-icon' }, open ? TYPE_ICON[lesson.type] : '🔒'),
-      h('span', { class: 'lesson-title' }, lesson.title),
-      starsEl(st));
+    const current = lesson === next;
+    const cls = ['node', lesson.type, open ? 'open' : 'locked', st ? 'done' : '', current ? 'current' : ''].join(' ');
+    return h('div', { class: 'node-wrap', style: `--x:${PATH[pos % PATH.length]}` },
+      current && h('div', { class: 'bubble' }, starsOf(COURSE.lessons[0]) ? 'CONTINUAR' : 'EMPEZAR'),
+      h('button', {
+        class: cls, disabled: !open, 'aria-label': lesson.title,
+        onclick: () => startLesson(lesson)
+      }, open ? nodeFace(lesson) : '🔒'),
+      st > 0 && starsEl(st),
+      h('div', { class: 'node-title' }, lesson.title));
   }
 
   function renderCourse() {
     const total = COURSE.lessons.length;
     const done = doneCount();
+    const starTotal = COURSE.lessons.reduce((a, l) => a + starsOf(l), 0);
     const next = COURSE.lessons.find((l) => !starsOf(l) && unlocked(l));
     view.append(
-      h('section', { class: 'card hero' },
-        h('h1', {}, 'Curso de código Morse'),
-        h('p', {}, `${done} de ${total} lecciones completadas`),
-        h('div', { class: 'bar' }, h('div', { style: `width:${(done / total) * 100}%` })),
-        next && h('button', { class: 'btn primary', onclick: () => startLesson(next) },
-          done ? `Continuar: ${next.title}` : 'Empezar el curso'))
-    );
-    for (const sec of COURSE.sections) {
+      h('section', { class: 'stats' },
+        h('div', {}, h('strong', {}, done), h('span', {}, 'lecciones')),
+        h('div', {}, h('strong', {}, `★ ${starTotal}`), h('span', {}, 'estrellas')),
+        h('div', {}, h('strong', {}, `${Math.round((done / total) * 100)} %`), h('span', {}, 'del curso'))));
+    COURSE.sections.forEach((sec, si) => {
       const ls = sec.subs.flatMap((s) => s.lessons).concat(sec.challenge);
       const d = ls.filter((l) => starsOf(l) > 0).length;
+      let pos = 0;
       view.append(
-        h('section', { class: 'card section' },
-          h('header', {},
-            h('span', { class: 'sec-icon' }, sec.icon),
-            h('div', {}, h('h2', {}, sec.title), h('p', { class: 'muted' }, sec.desc)),
-            h('span', { class: 'pill' }, `${d}/${ls.length}`)),
-          sec.subs.map((sub) => h('div', { class: 'sub' },
-            h('h3', {}, sub.title),
-            sub.lessons.map(lessonRow))),
-          lessonRow(sec.challenge))
-      );
-    }
+        h('section', { class: `unit unit-${si % 6}`, id: `sec-${sec.id}` },
+          h('header', { class: 'unit-banner' },
+            h('div', {},
+              h('small', {}, `SECCIÓN ${si + 1} · ${d}/${ls.length}`),
+              h('h2', {}, sec.title),
+              h('p', {}, sec.desc)),
+            h('span', { class: 'unit-icon' }, sec.icon),
+            h('div', { class: 'bar' }, h('div', { style: `width:${(d / ls.length) * 100}%` }))),
+          sec.subs.map((sub) => [
+            h('div', { class: 'divider' }, h('span', {}, sub.title)),
+            h('div', { class: 'path' }, sub.lessons.map((l) => pathNode(l, pos++, next)))
+          ]),
+          h('div', { class: 'path' }, pathNode(sec.challenge, 0, next))));
+    });
+    // Llevar a la vista la lección en curso.
+    const cur = view.querySelector('.node.current');
+    if (cur && done) requestAnimationFrame(() => cur.scrollIntoView({ block: 'center' }));
   }
 
   // ------------------------------------------------------------ Lección
@@ -201,7 +303,8 @@
       h('div', { class: 'lesson-top' },
         h('button', { class: 'icon-btn', 'aria-label': 'Salir', onclick: () => go('course') }, '✕'),
         h('div', { class: 'bar' }, h('div', { style: `width:${(Math.min(run.i, run.exs.length) / run.exs.length) * 100}%` })),
-        run.lives !== null && h('span', { class: 'lives' }, '❤'.repeat(run.lives) + '♡'.repeat(3 - run.lives)))
+        run.lives !== null && h('span', { class: 'lives' }, '❤'.repeat(run.lives) + '♡'.repeat(3 - run.lives))),
+      !done && outputsBar()
     );
     if (done) return renderResult(run);
     const ex = run.exs[run.i];
@@ -228,14 +331,14 @@
     else if (run.lives !== null) run.lives--;
     body.querySelectorAll('button.opt, input, .key').forEach((b) => { b.disabled = true; });
     const panel = h('div', { class: `feedback ${ok ? 'ok' : 'bad'}` },
-      h('strong', {}, ok ? '✔ ¡Correcto!' : '✘ Incorrecto'),
+      h('strong', { class: 'fb-title' }, ok ? '✔ ¡Correcto!' : '✘ Incorrecto'),
       detail,
       !ok && h('div', { class: 'solution' },
         h('span', { class: 'big-label small' }, ex.item.text), patternEl(ex.item.morse)),
       ex.item.meaning && h('p', { class: 'muted' }, ex.item.meaning),
       h('button', { class: 'btn primary', onclick: nextExercise }, 'Continuar'));
     body.append(panel);
-    panel.querySelector('button').focus();
+    panel.querySelector('button').focus({ preventScroll: true });
     if (!ok || ex.type === 'read-choose') playMorse(ex.item.morse);
     if (S.vibrate && navigator.vibrate) navigator.vibrate(ok ? 30 : [60, 60, 60]);
   }
@@ -256,7 +359,7 @@
       it.meaning && h('p', { class: 'meaning' }, it.meaning),
       h('p', { class: 'muted' }, 'Escúchalo varias veces y fíjate en su ritmo.'),
       playButton(it, true),
-      h('button', { class: 'btn primary', onclick: nextExercise }, 'Entendido'));
+      h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: nextExercise }, 'Entendido')));
     playMorse(it.morse);
   }
 
@@ -307,7 +410,7 @@
       h('p', { class: 'prompt' }, 'Escucha y escribe'),
       playButton(ex.item, true),
       input,
-      !single && h('button', { class: 'btn primary', onclick: check }, 'Comprobar'));
+      !single && h('div', { class: 'action-bar' }, h('button', { class: 'btn primary', onclick: check }, 'Comprobar')));
     playMorse(ex.item.morse);
     setTimeout(() => input.focus(), 50);
   }
@@ -375,7 +478,9 @@
       if (e) e.preventDefault();
       if (pad.disabled) return;
       pad.classList.add('down');
-      player.toneOn(S.freq, S.volume);
+      if (S.out.sound) player.toneOn(S.freq, S.volume, S.wave);
+      if (S.out.vibrate && navigator.vibrate) navigator.vibrate(10000);
+      light(true);
       keyer.down(performance.now());
     };
     const up = (e) => {
@@ -383,6 +488,8 @@
       if (!pad.classList.contains('down')) return;
       pad.classList.remove('down');
       player.toneOff();
+      if (S.out.vibrate && navigator.vibrate) navigator.vibrate(0);
+      light(false);
       keyer.up(performance.now());
     };
     pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); down(e); });
@@ -431,7 +538,7 @@
           class: state.practiceTab === id ? 'active' : '',
           onclick: () => { state.practiceTab = id; render(); }
         }, t)));
-    view.append(h('h1', {}, 'Práctica'), tabs);
+    view.append(h('div', { class: 'title-row' }, h('h1', {}, 'Práctica'), outputsBar()), tabs);
     const card = h('section', { class: 'card' });
     view.append(card);
     ({ receive: practiceReceive, groups: practiceGroups, send: practiceSend })[state.practiceTab](card);
@@ -555,7 +662,6 @@
   // ------------------------------------------------------------ Traductor
 
   function renderTranslator() {
-    const flash = h('div', { class: 'flash-overlay', onclick: () => player.stop() });
     const output = h('div', { class: 'translation' });
     let morse = '';
     const input = h('textarea', {
@@ -576,23 +682,26 @@
         output.append(h('div', { class: 'out-morse' }, morse), patternEl(morse));
       }
     };
-    const playWith = (extra) => morse && playMorse(morse, extra);
+    const playBtn = h('button', {
+      class: 'btn primary', onclick: () => {
+        if (player.playing) return player.stop();
+        if (!morse) return;
+        if (!S.out.sound && !S.out.vibrate && !S.out.flash && !S.out.torch) {
+          return toast('Activa al menos una salida: sonido, vibración, pantalla o linterna.');
+        }
+        playBtn.textContent = '⏹ Parar';
+        playMorse(morse).then(() => { playBtn.textContent = '▶ Reproducir'; });
+      }
+    }, '▶ Reproducir');
     view.append(
       h('h1', {}, 'Traductor'),
       h('section', { class: 'card' },
         input,
         output,
-        h('div', { class: 'row wrap' },
-          h('button', { class: 'btn primary', onclick: () => playWith({}) }, '🔊 Sonido'),
-          h('button', {
-            class: 'btn', onclick: () => {
-              document.body.append(flash);
-              playWith({ sound: false, onSegment: (on) => flash.classList.toggle('on', on) })
-                .then(() => flash.remove());
-            }
-          }, '💡 Luz'),
-          h('button', { class: 'btn', onclick: () => playWith({ sound: false, vibrate: true }) }, '📳 Vibración'),
-          h('button', { class: 'btn ghost', onclick: () => { player.stop(); flash.remove(); } }, '⏹ Parar'),
+        h('p', { class: 'muted small' }, 'Elige cómo transmitir:'),
+        outputsBar(),
+        h('div', { class: 'row' },
+          playBtn,
           h('button', {
             class: 'btn ghost', onclick: (e) => {
               const btn = e.currentTarget;
@@ -600,8 +709,7 @@
               if (txt && navigator.clipboard) navigator.clipboard.writeText(txt).then(() => { btn.textContent = '✔ Copiado'; });
             }
           }, '📋 Copiar')),
-        h('p', { class: 'muted small' }, 'Los prosignos se escriben entre < >, por ejemplo <SK> o <AR>.')));
-    onCleanup(() => flash.remove());
+        h('p', { class: 'muted small' }, 'Los prosignos se escriben entre < >, por ejemplo <SK> o <AR>. La linterna funciona en Chrome para Android; en iPhone no está disponible.')));
     update();
   }
 
@@ -625,7 +733,7 @@
             onclick: (e) => {
               const cell = e.currentTarget;
               cell.classList.add('playing');
-              playMorse(m).then(() => cell.classList.remove('playing'));
+              playMorse(m, { sound: true, vibrate: false, onSegment: null }).then(() => cell.classList.remove('playing'));
             }
           }, h('span', { class: 'cell-char' }, c.replace(/[<>]/g, '')), patternEl(m));
         }))));
@@ -633,7 +741,7 @@
     const glossary = (title, keys) => h('section', { class: 'card' },
       h('h2', {}, title),
       h('dl', { class: 'glossary' }, keys.map((k) => [
-        h('dt', {}, h('button', { class: 'link', onclick: () => playMorse(Morse.encode(k)) }, k.replace(/[<>]/g, ''))),
+        h('dt', {}, h('button', { class: 'link', onclick: () => playMorse(Morse.encode(k), { sound: true, vibrate: false, onSegment: null }) }, k.replace(/[<>]/g, ''))),
         h('dd', {}, Course.MEANINGS[k])
       ])));
     const items = Object.keys(Course.MEANINGS);
@@ -672,16 +780,30 @@
     const toggle = (key, label, desc) => h('label', { class: 'toggle' },
       h('input', { type: 'checkbox', checked: S[key], onchange: (e) => { S[key] = e.target.checked; save(); } }),
       h('span', {}, h('strong', {}, label), desc && h('small', { class: 'muted' }, desc)));
+    const choice = (key, label, opts, after) => h('label', { class: 'field' }, label,
+      h('select', {
+        onchange: (e) => { S[key] = e.target.value; save(); if (after) after(); }
+      }, opts.map(([v, t]) => h('option', { value: v, selected: S[key] === v }, t))));
     view.append(
       h('h1', {}, 'Ajustes'),
       h('section', { class: 'card' },
+        h('h2', {}, 'Apariencia'),
+        choice('theme', 'Tema', [['midnight', 'Medianoche'], ['slate', 'Pizarra'], ['light', 'Claro']], applyTheme)),
+      h('section', { class: 'card' },
         h('h2', {}, 'Sonido'),
+        choice('wave', 'Timbre', [['clear', 'Nítido (recomendado en móvil)'], ['sine', 'Suave (onda pura)']]),
         slider('wpm', 'Velocidad de caracteres', 5, 40, 1, (v) => `${v} ppm`),
         slider('eff', 'Velocidad efectiva (Farnsworth)', 3, 40, 1, (v) => `${v} ppm`),
         h('p', { class: 'muted small' }, 'Aprender con caracteres rápidos y más espacio entre ellos ayuda a reconocer el sonido de cada letra en vez de contar puntos y rayas.'),
         slider('freq', 'Tono', 300, 1200, 10, (v) => `${v} Hz`),
         slider('volume', 'Volumen', 0.05, 1, 0.05, (v) => `${Math.round(v * 100)} %`),
-        h('button', { class: 'btn', onclick: () => playMorse(Morse.encode('PARIS')) }, '🔊 Probar')),
+        h('button', { class: 'btn', onclick: () => playMorse(Morse.encode('PARIS')) }, '▶ Probar con «PARIS»'),
+        h('p', { class: 'muted small' }, 'En iPhone, el interruptor de silencio también silencia la app.')),
+      h('section', { class: 'card' },
+        h('h2', {}, 'Salidas'),
+        h('p', { class: 'muted small' }, 'Cómo se transmite el Morse. También puedes cambiarlas durante una lección con los botones de arriba.'),
+        outputsBar(),
+        h('p', { class: 'muted small' }, '🔊 sonido · 📳 vibración · ⚡ destello de pantalla · 🔦 linterna (pide permiso de cámara; solo en Android)')),
       h('section', { class: 'card' },
         h('h2', {}, 'Envío'),
         slider('sendWpm', 'Velocidad de envío', 4, 30, 1, (v) => `${v} ppm`),
@@ -689,7 +811,7 @@
       h('section', { class: 'card' },
         h('h2', {}, 'Curso'),
         toggle('send', 'Ejercicios de envío', 'Incluir ejercicios con el manipulador en las lecciones.'),
-        toggle('vibrate', 'Vibración', 'Vibrar al acertar o fallar.'),
+        toggle('vibrate', 'Vibrar al responder', 'Una vibración corta al acertar y tres al fallar.'),
         toggle('unlockAll', 'Desbloquear todo', 'Acceder a cualquier lección sin completar las anteriores.'),
         h('button', {
           class: 'btn danger', onclick: () => {
@@ -701,7 +823,18 @@
 
   // ------------------------------------------------------------ Inicio
 
+  applyTheme();
   render();
+
+  // Apagar la linterna si la app pasa a segundo plano.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && torch.ready) {
+      player.stop();
+      torch.release();
+      S.out.torch = false;
+      document.querySelectorAll('.out-btn[aria-label="Linterna"]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    }
+  });
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});

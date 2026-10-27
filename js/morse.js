@@ -121,9 +121,23 @@
 
   // ---------------------------------------------------------------- Audio
 
+  // Armónicos de cada timbre. «clear» añade algo de 3.º y 5.º armónico para
+  // que el pitido se distinga mejor en altavoces de móvil.
+  const WAVES = { clear: [0, 1, 0, 0.18, 0, 0.06], sine: [0, 1] };
+
+  // Rampa de coseno alzado: sin chasquidos al empezar y acabar cada pitido.
+  function ramp(from, to) {
+    const n = 64;
+    const c = new Float32Array(n);
+    for (let i = 0; i < n; i++) c[i] = from + (to - from) * (0.5 - 0.5 * Math.cos((Math.PI * i) / (n - 1)));
+    return c;
+  }
+
   class Player {
     constructor() {
       this.ctx = null;
+      this.out = null;
+      this.waves = {};
       this.current = null;
       this.side = null;
     }
@@ -132,74 +146,102 @@
       if (!this.ctx) {
         const AC = root.AudioContext || root.webkitAudioContext;
         if (!AC) return null;
-        this.ctx = new AC();
+        this.ctx = new AC({ latencyHint: 'interactive' });
+        // Limitador: permite subir el volumen sin distorsionar.
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = -6;
+        comp.knee.value = 4;
+        comp.ratio.value = 12;
+        comp.attack.value = 0.002;
+        comp.release.value = 0.08;
+        comp.connect(this.ctx.destination);
+        this.out = comp;
       }
-      if (this.ctx.state === 'suspended') this.ctx.resume();
       return this.ctx;
+    }
+
+    // Se llama de forma síncrona dentro del gesto del usuario.
+    _ready() {
+      const ctx = this.ensure();
+      if (!ctx) return Promise.resolve(null);
+      if (ctx.state === 'running') return Promise.resolve(ctx);
+      return ctx.resume().then(() => ctx, () => ctx);
+    }
+
+    _osc(wave, freq) {
+      const ctx = this.ctx;
+      const osc = ctx.createOscillator();
+      const h = WAVES[wave] || WAVES.clear;
+      if (!this.waves[wave]) {
+        this.waves[wave] = ctx.createPeriodicWave(new Float32Array(h), new Float32Array(h.length));
+      }
+      osc.setPeriodicWave(this.waves[wave]);
+      osc.frequency.value = freq;
+      return osc;
     }
 
     get playing() {
       return !!this.current;
     }
 
-    // opts: wpm, eff, freq, volume, sound, onSegment(on), vibrate
+    // opts: wpm, eff, freq, volume, wave, sound, vibrate, onSegment(on)
     play(morse, opts) {
       this.stop();
-      const o = Object.assign({ wpm: 18, eff: 10, freq: 650, volume: 0.6, sound: true }, opts);
+      const o = Object.assign({ wpm: 18, eff: 10, freq: 700, volume: 0.8, wave: 'clear', sound: true }, opts);
       const segs = timeline(morse, timing(o.wpm, o.eff));
       const total = duration(segs);
-      const ctx = o.sound ? this.ensure() : null;
-      const run = { timers: [], osc: null, resolve: null };
+      const run = { timers: [], osc: null, resolve: null, stopped: false, onSegment: o.onSegment };
       this.current = run;
+      const done = new Promise((resolve) => { run.resolve = resolve; });
+      const ready = o.sound ? this._ready() : Promise.resolve(null);
 
-      const lead = 0.06;
-      if (ctx) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = o.freq;
-        gain.gain.value = 0;
-        osc.connect(gain).connect(ctx.destination);
-        const ramp = Math.min(0.005, (1.2 / o.wpm) / 4);
-        let t = ctx.currentTime + lead;
-        for (const s of segs) {
-          if (s.on) {
-            gain.gain.setValueAtTime(0, t);
-            gain.gain.linearRampToValueAtTime(o.volume, t + ramp);
-            gain.gain.setValueAtTime(o.volume, t + s.d - ramp);
-            gain.gain.linearRampToValueAtTime(0, t + s.d);
+      ready.then((ctx) => {
+        if (run.stopped) return;
+        const lead = 0.08;
+        if (ctx) {
+          const osc = this._osc(o.wave, o.freq);
+          const gain = ctx.createGain();
+          gain.gain.value = 0;
+          osc.connect(gain).connect(this.out);
+          const rise = Math.min(0.005, (1.2 / o.wpm) * 0.2);
+          const up = ramp(0, o.volume);
+          const down = ramp(o.volume, 0);
+          let t = ctx.currentTime + lead;
+          for (const s of segs) {
+            if (s.on) {
+              gain.gain.setValueCurveAtTime(up, t, rise);
+              gain.gain.setValueCurveAtTime(down, t + s.d - rise, rise);
+            }
+            t += s.d;
           }
-          t += s.d;
+          osc.start(ctx.currentTime);
+          osc.stop(t + 0.05);
+          run.osc = osc;
         }
-        osc.start(ctx.currentTime);
-        osc.stop(t + 0.05);
-        run.osc = osc;
-      }
 
-      if (o.onSegment) {
-        let t = lead;
-        for (const s of segs) {
-          const on = s.on;
-          run.timers.push(setTimeout(() => o.onSegment(on), t * 1000));
-          t += s.d;
+        if (o.onSegment) {
+          let t = lead;
+          for (const s of segs) {
+            const on = s.on;
+            run.timers.push(setTimeout(() => o.onSegment(on), t * 1000));
+            t += s.d;
+          }
         }
-        run.timers.push(setTimeout(() => o.onSegment(false), t * 1000));
-      }
 
-      if (o.vibrate && root.navigator && navigator.vibrate) {
-        const pattern = segs.map((s) => Math.round(s.d * 1000));
-        navigator.vibrate(pattern);
-        run.vibrating = true;
-      }
+        if (o.vibrate && root.navigator && navigator.vibrate) {
+          const pattern = segs.map((s) => Math.round(s.d * 1000));
+          run.timers.push(setTimeout(() => navigator.vibrate(pattern), lead * 1000));
+          run.vibrating = true;
+        }
 
-      return new Promise((resolve) => {
-        run.resolve = resolve;
         run.timers.push(setTimeout(() => this._finish(run), (total + lead) * 1000 + 30));
       });
+      return done;
     }
 
     _finish(run) {
       run.timers.forEach(clearTimeout);
+      if (run.onSegment) run.onSegment(false);
       if (this.current === run) this.current = null;
       if (run.resolve) run.resolve();
       run.resolve = null;
@@ -208,6 +250,7 @@
     stop() {
       const run = this.current;
       if (!run) return;
+      run.stopped = true;
       if (run.osc) {
         try { run.osc.stop(); } catch (e) { /* ya detenido */ }
       }
@@ -216,23 +259,25 @@
     }
 
     // Tono lateral para el manipulador.
-    toneOn(freq, volume) {
+    toneOn(freq, volume, wave) {
       const ctx = this.ensure();
       if (!ctx) return;
-      if (!this.side) {
-        const osc = ctx.createOscillator();
+      if (ctx.state !== 'running') ctx.resume();
+      if (!this.side || this.side.wave !== wave) {
+        if (this.side) this.side.osc.stop();
+        const osc = this._osc(wave || 'clear', freq);
         const gain = ctx.createGain();
-        osc.type = 'sine';
         gain.gain.value = 0;
-        osc.connect(gain).connect(ctx.destination);
+        osc.connect(gain).connect(this.out);
         osc.start();
-        this.side = { osc, gain };
+        this.side = { osc, gain, wave };
       }
       const { osc, gain } = this.side;
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.cancelScheduledValues(ctx.currentTime);
-      gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.005);
+      const now = ctx.currentTime;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(volume, now + 0.004);
     }
 
     toneOff() {
@@ -241,7 +286,60 @@
       const now = this.ctx.currentTime;
       gain.gain.cancelScheduledValues(now);
       gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(0, now + 0.005);
+      gain.gain.linearRampToValueAtTime(0, now + 0.004);
+    }
+  }
+
+  // ------------------------------------------------------------- Linterna
+
+  // Enciende el flash de la cámara trasera (Chrome en Android, con HTTPS).
+  class Torch {
+    constructor() {
+      this.track = null;
+      this.pending = null;
+      this.state = false;
+    }
+
+    static supported() {
+      return !!(root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    get ready() {
+      return !!this.track;
+    }
+
+    // Pide acceso a la cámara. Rechaza si el dispositivo no tiene linterna.
+    enable() {
+      if (this.track) return Promise.resolve();
+      if (this.pending) return this.pending;
+      if (!Torch.supported()) return Promise.reject(new Error('unsupported'));
+      this.pending = navigator.mediaDevices
+        .getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+        .then((stream) => {
+          const track = stream.getVideoTracks()[0];
+          const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+          if (!caps.torch) {
+            stream.getTracks().forEach((t) => t.stop());
+            throw new Error('no-torch');
+          }
+          this.track = track;
+        })
+        .finally(() => { this.pending = null; });
+      return this.pending;
+    }
+
+    set(on) {
+      if (!this.track || this.state === on) return;
+      this.state = on;
+      this.track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {});
+    }
+
+    release() {
+      if (!this.track) return;
+      this.set(false);
+      this.track.stop();
+      this.track = null;
+      this.state = false;
     }
   }
 
@@ -326,7 +424,7 @@
 
   const api = {
     CHARS, PROSIGNS, normalize, tokenize, patternOf, encode, decode, decodeLetter,
-    isMorse, cleanMorse, timing, timeline, duration, Player, Keyer, decodeTimings
+    isMorse, cleanMorse, timing, timeline, duration, Player, Torch, Keyer, decodeTimings
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
