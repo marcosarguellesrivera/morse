@@ -129,6 +129,13 @@ test('preguntas: opciones correctas y sin repetir seguidas', () => {
   }
 });
 
+test('en las lecciones las opciones no cambian de sitio', () => {
+  const c = Course.build();
+  const l = c.lessons.find((x) => x.type === 'learn' && x.subtitle === 'L & F');
+  const next = Course.questions(l);
+  for (let i = 0; i < 20; i++) assert.deepStrictEqual(next().options.map((o) => o.text), ['L', 'F']);
+});
+
 test('comparación de respuestas escritas', () => {
   assert.ok(Course.sameText('sk', '<SK>'));
   assert.ok(Course.sameText(' tnx  qso 73 sk', 'TNX QSO 73 <SK>'));

@@ -208,10 +208,9 @@
       do { it = pool[Math.floor(rng() * pool.length)]; } while (pool.length > 1 && it === last);
       last = it;
       if (lesson.kb) return { item: it, options: null };
-      let options = pool;
-      if (pool.length > MAX_OPTIONS) {
-        options = [it, ...shuffle(pool.filter((p) => p !== it), rng).slice(0, MAX_OPTIONS - 1)];
-      }
+      // Si caben todas, cada opción se queda en su sitio toda la sesión.
+      if (pool.length <= MAX_OPTIONS) return { item: it, options: pool };
+      const options = [it, ...shuffle(pool.filter((p) => p !== it), rng).slice(0, MAX_OPTIONS - 1)];
       return { item: it, options: shuffle(options, rng) };
     };
   }
