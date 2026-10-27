@@ -574,3 +574,4 @@ body.in-lesson .view { max-width: none; padding: 0; }
 }
 .result-actions .answer { min-height: 84px; font-size: 1.4rem; }
 .answer.primary { background: #0f3a40; }
+.pattern .pulse { border-radius: 8px; transition: none; }

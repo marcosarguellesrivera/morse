@@ -15,9 +15,10 @@ Todas las sesiones se hacen en dos modos que avanzan por separado:
 
 - **Recepción**: suena el código y eliges la respuesta. En las lecciones hay dos botones;
   en repasos y desafíos, un teclado completo con solo lo aprendido activo. Se muestra la
-  solución durante 3 segundos y se pasa a la siguiente.
+  solución durante 1,5 segundos y se pasa a la siguiente.
 - **Envío**: transmites el carácter manteniendo pulsada la zona inferior (o la barra
-  espaciadora). La app aprende tu velocidad y comprueba cada punto y raya al momento.
+  espaciadora). Cada pulso se dibuja mientras lo mantienes (crece y pasa a raya al
+  superar el umbral); la app aprende tu velocidad y comprueba cada punto y raya al momento.
 
 Una sesión se supera con un 80 % de aciertos (sesiones de 20, 25 y 15 preguntas). La
 pantalla de Lecciones muestra el progreso de recepción, desafíos y envío y la racha de días.

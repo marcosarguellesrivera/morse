@@ -437,7 +437,7 @@
   // ------------------------------------------------------------ Sesión
 
   // Tiempo que se muestra la respuesta antes de pasar a la siguiente.
-  const REVEAL_MS = 3000;
+  const REVEAL_MS = 1500;
 
   // El cronómetro de envío recuerda la velocidad aprendida entre preguntas.
   let sendTimer = null;
@@ -644,6 +644,37 @@
       let hinted = false;
       let idle = null;
       const sentEl = h('div', { class: 'sent' });
+      // Pulso en curso: crece mientras se mantiene pulsado y pasa a raya al
+      // superar el umbral, para ver lo que se envía antes de soltar.
+      let pulse = null;
+      let raf = 0;
+      const startPulse = () => {
+        const m = judge.morse();
+        const row = m ? patternEl(m, 'live') : h('span', { class: 'pattern live' });
+        // Mismo carácter: el pulso se añade a la última letra; si no, empieza una nueva.
+        const letter = judge.current ? row.lastElementChild : h('span', { class: 'letter' });
+        if (!judge.current) {
+          if (m) row.append(h('span', { class: 'gap' }));
+          row.append(letter);
+        }
+        pulse = h('span', { class: 'dot pulse' });
+        letter.append(pulse);
+        (hinted ? sentEl : pat).replaceChildren(row);
+        const t0 = performance.now();
+        const tick = () => {
+          const ms = performance.now() - t0;
+          const th = sendTimer.threshold;
+          pulse.style.width = `${15 + 31 * Math.min(1, ms / th)}px`;
+          pulse.className = ms >= th ? 'dash pulse' : 'dot pulse';
+          raf = requestAnimationFrame(tick);
+        };
+        tick();
+      };
+      const stopPulse = () => {
+        cancelAnimationFrame(raf);
+        pulse = null;
+      };
+      onCleanup(stopPulse);
       const draw = (st) => {
         const m = judge.morse();
         if (!hinted || st) pat.replaceChildren(m ? patternEl(m, st || 'live') : '');
@@ -657,8 +688,9 @@
       answers.replaceChildren(pad);
       bindKey(pad, {
         enabled: () => !busy,
-        down: () => clearTimeout(idle),
+        down: () => { clearTimeout(idle); startPulse(); },
         up: (ms) => {
+          stopPulse();
           const st = judge.feed(sendTimer.classify(ms));
           if (st === 'progress') {
             draw();
