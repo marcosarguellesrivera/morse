@@ -1137,6 +1137,73 @@
 
   // ------------------------------------------------------------ Ajustes
 
+  // ------------------------------------------------------------ Recordatorio
+
+  // Clave pública para las notificaciones push. La privada solo está en los
+  // secretos del repositorio, que usa la tarea diaria de GitHub Actions.
+  const VAPID_PUBLIC_KEY = 'BG0HmX_4yGLipxAvZ24f9FSfF5na9B0rmrkHRXEZzO-pbLfdPXZhza6zYhBwj_-RR9YVmBhSv47MwVfaws83Q5E';
+
+  function keyBytes(b64) {
+    const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4));
+    return Uint8Array.from(s, (c) => c.charCodeAt(0));
+  }
+
+  function reminderCard() {
+    const body = h('div', {});
+    const card = h('section', { class: 'card' }, h('h2', {}, 'Recordatorio diario'), body);
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (!supported) {
+      body.append(h('p', { class: 'muted small' }, 'Este navegador no admite notificaciones. En iPhone, instala primero la app en la pantalla de inicio y ábrela desde ahí.'));
+      return card;
+    }
+    const regReady = () => navigator.serviceWorker.ready;
+    const off = () => body.replaceChildren(
+      h('p', { class: 'muted small' }, 'Recibe cada mañana a las 8:15 un aviso para hacer tu lección.'),
+      h('button', { class: 'btn primary', onclick: enable }, 'Activar recordatorio'));
+    const on = (sub) => {
+      const code = h('textarea', { class: 'answer-input code', rows: 5, readonly: true, value: JSON.stringify(sub) });
+      body.replaceChildren(
+        h('p', { class: 'small' }, '✔ Notificaciones activadas en este dispositivo.'),
+        h('p', { class: 'muted small' }, 'Para que lleguen cada día, copia este código y guárdalo en GitHub como secreto ',
+          h('strong', {}, 'PUSH_SUBSCRIPTION'), ' (solo hace falta una vez por dispositivo):'),
+        code,
+        h('div', { class: 'row' },
+          h('button', {
+            class: 'btn', onclick: (e) => {
+              const btn = e.currentTarget;
+              code.select();
+              (navigator.clipboard ? navigator.clipboard.writeText(code.value) : Promise.reject())
+                .then(() => { btn.textContent = '✔ Copiado'; }, () => toast('Mantén pulsado el código para copiarlo.'));
+            }
+          }, 'Copiar código'),
+          h('button', {
+            class: 'btn ghost', onclick: () => regReady().then((reg) => reg.showNotification('Código Morse', {
+              body: 'Así se verá el recordatorio de cada día.', icon: 'icons/icon-192.png', badge: 'icons/badge.png', tag: 'prueba'
+            }))
+          }, 'Probar aviso')),
+        h('button', {
+          class: 'btn danger', onclick: () => regReady()
+            .then((reg) => reg.pushManager.getSubscription())
+            .then((s) => s && s.unsubscribe())
+            .then(off)
+        }, 'Desactivar'));
+    };
+    const enable = () => {
+      Notification.requestPermission().then((perm) => {
+        if (perm !== 'granted') {
+          toast('Sin permiso no se pueden mostrar avisos. Actívalo en los ajustes del navegador.');
+          return;
+        }
+        return regReady()
+          .then((reg) => reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_PUBLIC_KEY) }))
+          .then(on);
+      }).catch(() => toast('No se pudo activar el recordatorio. Comprueba que la app está instalada y tienes conexión.'));
+    };
+    body.append(h('p', { class: 'muted small' }, 'Comprobando…'));
+    regReady().then((reg) => reg.pushManager.getSubscription()).then((sub) => (sub ? on(sub) : off()), off);
+    return card;
+  }
+
   function renderSettings() {
     const refs = {};
     const sync = () => {
@@ -1192,6 +1259,7 @@
         h('h2', {}, 'Envío'),
         slider('sendWpm', 'Velocidad de envío inicial', 4, 40, 1, (v) => `${v} ppm`),
         h('p', { class: 'muted small' }, 'Punto de partida para distinguir puntos de rayas. Después la app se adapta sola a tu forma de manipular.')),
+      reminderCard(),
       h('section', { class: 'card' },
         h('h2', {}, 'Curso'),
         toggle('vibrate', 'Vibrar al responder', 'Una vibración corta al acertar y tres al fallar.'),

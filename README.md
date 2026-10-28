@@ -57,6 +57,31 @@ y abrir <http://localhost:8080>.
 
 Después funciona sin conexión.
 
+## Recordatorio diario (notificaciones)
+
+Cada día a las 8:15 (hora de España) una tarea de GitHub Actions
+(`.github/workflows/recordatorio.yml`) envía una notificación push al móvil.
+Hay que configurarlo una sola vez:
+
+1. **Clave privada.** En GitHub: *Settings → Secrets and variables → Actions →
+   New repository secret*. Nombre `VAPID_PRIVATE_KEY`, valor: la clave privada que
+   corresponde a `VAPID_PUBLIC_KEY` de `js/app.js`. No la subas nunca al repositorio.
+2. **Activar en el móvil.** Abre la app instalada → *Ajustes → Recordatorio diario →
+   Activar recordatorio*, acepta el permiso y pulsa *Copiar código*.
+3. **Suscripción.** Crea otro secreto llamado `PUSH_SUBSCRIPTION` y pega el código.
+   Para varios dispositivos, pon los códigos en una lista: `[{…}, {…}]`.
+4. **Probar.** En la pestaña *Actions → Recordatorio diario → Run workflow* se envía
+   un aviso al momento.
+
+Notas:
+- GitHub solo trabaja en UTC; hay dos ejecuciones (horario de verano e invierno) y el
+  script solo envía en la que cae a las 8:15 en `Europe/Madrid`. Para cambiar la hora,
+  edita los `cron` y `REMINDER_HOUR` del workflow.
+- GitHub puede retrasar unos minutos las tareas programadas y las desactiva si el
+  repositorio pasa 60 días sin actividad; se reactivan desde la pestaña *Actions*.
+- Si desinstalas la app o borras sus datos, la suscripción caduca: actívala de nuevo y
+  actualiza `PUSH_SUBSCRIPTION`. En iPhone hace falta iOS 16.4+ y la app instalada.
+
 ## Desarrollo
 
 ```
@@ -65,7 +90,8 @@ css/styles.css        Estilos (modo claro y oscuro)
 js/morse.js           Tabla Morse, codificación, temporización, audio y manipulador
 js/course.js          Estructura del curso y generador de ejercicios
 js/app.js             Interfaz
-sw.js                 Caché para uso sin conexión
+sw.js                 Caché sin conexión y notificaciones
+scripts/              Envío del recordatorio diario
 test/                 Pruebas (node --test)
 ```
 

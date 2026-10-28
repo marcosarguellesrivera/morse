@@ -1,0 +1,31 @@
+name: Recordatorio diario
+
+on:
+  schedule:
+    # GitHub usa UTC: 6:15 UTC son las 8:15 en horario de verano y 7:15 UTC
+    # las 8:15 en invierno. El script solo envía en la que corresponde.
+    - cron: '15 6 * * *'
+    - cron: '15 7 * * *'
+  # Permite lanzarlo a mano desde la pestaña Actions para probarlo.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-package-lock web-push@3.6.7
+      - run: node scripts/send-reminder.mjs
+        env:
+          VAPID_PUBLIC_KEY: BG0HmX_4yGLipxAvZ24f9FSfF5na9B0rmrkHRXEZzO-pbLfdPXZhza6zYhBwj_-RR9YVmBhSv47MwVfaws83Q5E
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REMINDER_HOUR: '8'
+          REMINDER_TZ: Europe/Madrid
