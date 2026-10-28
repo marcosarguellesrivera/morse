@@ -664,7 +664,8 @@
         const tick = () => {
           const ms = performance.now() - t0;
           const th = sendTimer.threshold;
-          pulse.style.width = `${15 + 31 * Math.min(1, ms / th)}px`;
+          // Sigue creciendo mientras se mantenga pulsado, sin tope de raya.
+          pulse.style.width = `${Math.min(15 + (31 * ms) / th, 240)}px`;
           pulse.className = ms >= th ? 'dash pulse' : 'dot pulse';
           raf = requestAnimationFrame(tick);
         };
@@ -797,30 +798,50 @@
   // y avisa con la duración de cada pulsación. También con la barra espaciadora.
   function bindKey(pad, opts) {
     let downAt = null;
+    // La vibración se pide a tramos cortos que se renuevan mientras dura la
+    // pulsación: no tiene límite de longitud y, si el móvil no llegara a
+    // avisar de que se ha soltado, se apaga sola en un momento.
+    let buzz = null;
+    const buzzOn = () => {
+      if (!S.out.vibrate || !navigator.vibrate) return;
+      navigator.vibrate(400);
+      buzz = setInterval(() => navigator.vibrate(400), 300);
+    };
+    const buzzOff = () => {
+      if (buzz === null) return;
+      clearInterval(buzz);
+      buzz = null;
+      navigator.vibrate(0);
+    };
     const down = (e) => {
       if (e) e.preventDefault();
       if (downAt !== null || (opts.enabled && !opts.enabled())) return;
       downAt = performance.now();
       pad.classList.add('down');
       if (S.out.sound) player.toneOn(S.freq, S.volume, S.wave);
-      if (S.out.vibrate && navigator.vibrate) navigator.vibrate(10000);
+      buzzOn();
       light(true);
       if (opts.down) opts.down();
     };
     const up = (e) => {
-      if (e) e.preventDefault();
+      if (e && e.cancelable) e.preventDefault();
       if (downAt === null) return;
       const ms = performance.now() - downAt;
       downAt = null;
       pad.classList.remove('down');
       player.toneOff();
-      if (S.out.vibrate && navigator.vibrate) navigator.vibrate(0);
+      buzzOff();
       light(false);
       opts.up(ms);
     };
     pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); down(e); });
     pad.addEventListener('pointerup', up);
     pad.addEventListener('pointercancel', up);
+    // Cualquier otra forma de perder el dedo o la ventana también suelta la tecla.
+    pad.addEventListener('lostpointercapture', up);
+    const hide = () => { if (document.hidden) up(); };
+    window.addEventListener('blur', up);
+    document.addEventListener('visibilitychange', hide);
     pad.addEventListener('contextmenu', (e) => e.preventDefault());
     const kd = (e) => {
       if (e.code !== 'Space' || e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -832,7 +853,10 @@
     onCleanup(() => {
       document.removeEventListener('keydown', kd);
       document.removeEventListener('keyup', ku);
+      window.removeEventListener('blur', up);
+      document.removeEventListener('visibilitychange', hide);
       player.toneOff();
+      buzzOff();
       light(false);
     });
   }
