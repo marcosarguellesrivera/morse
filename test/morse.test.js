@@ -71,6 +71,14 @@ test('el umbral de punto/raya se adapta a quien manipula', () => {
   assert.ok(t.threshold > 60 && t.threshold < 180);
 });
 
+test('una raya muy larga no desajusta el umbral', () => {
+  const t = new Morse.AdaptiveTimer(100);
+  [100, 300, 100, 300, 100, 300].forEach((ms) => t.classify(ms));
+  assert.strictEqual(t.classify(3000), '-'); // pulsación de 3 s: sigue siendo raya
+  // Las rayas y puntos normales se siguen leyendo bien después.
+  assert.strictEqual([100, 300, 300, 100, 300].map((ms) => t.classify(ms)).join(''), '.--.-');
+});
+
 test('SendJudge acepta sin esperar pausas y detecta fallos al momento', () => {
   const ok = new Morse.SendJudge(Morse.encode('TNX'));
   const states = [...'--.-..-'].map((e) => ok.feed(e));

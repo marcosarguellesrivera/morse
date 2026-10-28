@@ -378,8 +378,11 @@
     }
 
     classify(ms) {
-      const el = ms < this.threshold ? '.' : '-';
-      this.history.push(ms);
+      const th = this.threshold;
+      const el = ms < th ? '.' : '-';
+      // Una raya muy larga cuenta como raya, pero no se guarda tal cual: si no,
+      // desplazaría el umbral y las rayas normales pasarían a leerse como puntos.
+      this.history.push(Math.min(ms, 2.5 * th));
       if (this.history.length > 16) this.history.shift();
       const split = this._split();
       if (split) {

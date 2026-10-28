@@ -603,3 +603,4 @@ body.in-lesson .view { max-width: none; padding: 0; }
 .result-actions .answer { min-height: clamp(56px, 10vh, 84px); }
 .result-screen .result-body { min-height: 0; overflow-y: auto; gap: clamp(10px, 2.5vh, 24px); }
 .ring-wrap { width: clamp(160px, 30vh, 250px); height: clamp(160px, 30vh, 250px); }
+textarea.code { font-family: ui-monospace, monospace; font-size: .75rem; text-transform: none; word-break: break-all; }
